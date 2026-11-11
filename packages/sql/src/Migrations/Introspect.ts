@@ -18,6 +18,27 @@ export const tableColumns = (
   schema?: string,
 ): Effect.Effect<TableColumn[], MigrationError, never> => {
   switch (executor.dialect) {
+    case "clickhouse":
+      return executor
+        .query(
+          `SELECT \`name\`, \`type\`
+             FROM system.columns
+            WHERE \`table\` = ${sqlLiteral(table, "clickhouse")}
+              AND \`database\` = ${
+                (schema ?? executor.defaultSchema) !== undefined
+                  ? sqlLiteral(schema ?? executor.defaultSchema, "clickhouse")
+                  : "currentDatabase()"
+              }
+            ORDER BY position;`,
+        )
+        .pipe(
+          Effect.map((rows) =>
+            rows.map((row) => ({
+              name: scalarText(row.name),
+              type: scalarText(row.type ?? "").toUpperCase(),
+            })),
+          ),
+        );
     case "sqlite":
       return executor.query(`PRAGMA table_info(${quoteIdentifier(table, "sqlite")});`).pipe(
         Effect.map((rows) =>

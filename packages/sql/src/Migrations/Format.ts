@@ -6,7 +6,7 @@ import type * as Effect from "effect/Effect";
  * dialect is `postgres` with `migrationTableId: "spanner"` and
  * `defaultSchema: "public"`.
  */
-export type MigrationDialect = "postgres" | "mysql" | "sqlite" | "googlesql";
+export type MigrationDialect = "postgres" | "mysql" | "sqlite" | "googlesql" | "clickhouse";
 
 /**
  * A single migration read from disk, normalized across directory layouts.
@@ -113,9 +113,10 @@ export class MigrationHistoryConflictError extends Data.TaggedError(
  * Already-applied migration files were edited or removed. History is
  * forward-only: add a new migration instead of rewriting files that have
  * already run. Renaming an applied file is not a rewrite when its
- * contents are unchanged: its row moves to the new name. PlanetScale
- * development branches replace rather than raising this; production
- * branches (and in-place apply on any target) fail with it.
+ * contents are unchanged: its row moves to the new name (ClickHouse
+ * rejects these renames with MigrationError). PlanetScale development
+ * branches replace rather than raising this; production branches (and
+ * in-place apply on any target) fail with it.
  */
 export class RewrittenMigrationHistoryError extends Data.TaggedError(
   "RewrittenMigrationHistoryError",

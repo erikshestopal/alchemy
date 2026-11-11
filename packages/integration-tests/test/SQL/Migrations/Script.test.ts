@@ -1,10 +1,10 @@
-import { scanSqlScript, splitSqlScript } from "@alchemy.run/sql/Migrations";
+import { scanSqlScript, splitSqlScript, type ScriptDialect } from "@alchemy.run/sql/Migrations";
 import { describe, expect, it } from "@alchemy.run/test";
 import * as Effect from "effect/Effect";
 
 const tags = { tags: ["unit", "local"] };
 
-const split = (sql: string, dialect: "postgres" | "mysql" | "googlesql") =>
+const split = (sql: string, dialect: ScriptDialect) =>
   Effect.sync(() => splitSqlScript(sql, dialect));
 
 describe("splitSqlScript", () => {
@@ -12,7 +12,7 @@ describe("splitSqlScript", () => {
     "splits on semicolons and drops terminators and blank statements",
     () =>
       Effect.gen(function* () {
-        for (const dialect of ["postgres", "mysql", "googlesql"] as const) {
+        for (const dialect of ["postgres", "mysql", "googlesql", "clickhouse"] as const) {
           expect(yield* split("SELECT 1;\n\n;SELECT 2;  ", dialect)).toEqual([
             "SELECT 1",
             "SELECT 2",
@@ -70,10 +70,14 @@ describe("splitSqlScript", () => {
   );
 
   it.effect(
-    "nests block comments only in PostgreSQL",
+    "nests block comments in PostgreSQL and ClickHouse",
     () =>
       Effect.gen(function* () {
         expect(yield* split("/* a /* b; */ c; */ SELECT 1; SELECT 2", "postgres")).toEqual([
+          "SELECT 1",
+          "SELECT 2",
+        ]);
+        expect(yield* split("/* a /* b; */ c; */ SELECT 1; SELECT 2", "clickhouse")).toEqual([
           "SELECT 1",
           "SELECT 2",
         ]);
@@ -118,6 +122,37 @@ describe("splitSqlScript", () => {
   );
 
   it.effect(
+    "keeps semicolons inside ClickHouse escaped quotes, Unicode quotes and heredocs",
+    () =>
+      Effect.gen(function* () {
+        const quoted = "SELECT 'it''s; -- text', 'a\\';b', \"col\\\";#x\", `col\\`;x`, 'c\\\\'";
+        const unicode = "SELECT “col; -- # \\\\”, ‘value; -- # \\’ FROM “table; /* data */”";
+        const heredoc = "SELECT $tag$raw; ' \\ -- /* $$ $other$ # text$tag$";
+        expect(yield* split(`${quoted}; ${unicode}; ${heredoc}; SELECT 2`, "clickhouse")).toEqual([
+          quoted,
+          unicode,
+          heredoc,
+          "SELECT 2",
+        ]);
+      }),
+    tags,
+  );
+
+  it.effect(
+    "removes ClickHouse line comments without requiring whitespace",
+    () =>
+      Effect.gen(function* () {
+        expect(
+          yield* split(
+            "--header;\nSELECT 1; # comment;\nSELECT 2; #!comment;\nSELECT 3; //comment;\nSELECT 4",
+            "clickhouse",
+          ),
+        ).toEqual(["SELECT 1", "SELECT 2", "SELECT 3", "SELECT 4"]);
+      }),
+    tags,
+  );
+
+  it.effect(
     "keeps `;` inside GoogleSQL strings, triple quotes, raw strings, and identifiers",
     () =>
       Effect.gen(function* () {
@@ -157,6 +192,44 @@ describe("scanSqlScript", () => {
 });
 
 describe("scanSqlScript alignment", () => {
+  it.effect(
+    "masks ClickHouse heredocs and quoted names while preserving keyword offsets",
+    () =>
+      Effect.sync(() => {
+        const [statement] = scanSqlScript(
+          '/* skip */ SELECT $body$DROP; \' \\ -- # /*$body$, `ALTER; TABLE`, "DELETE;", “INSERT;”, ‘VALUES;’ FROM t',
+          "clickhouse",
+        );
+        expect(statement!.code.length).toEqual(statement!.sql.length);
+        expect(statement!.code).not.toMatch(/DROP|ALTER|TABLE|DELETE|INSERT|VALUES/);
+        const at = statement!.code.indexOf("FROM");
+        expect(statement!.sql.slice(at)).toEqual("FROM t");
+        expect(statement!.unterminated).toBeUndefined();
+      }),
+    tags,
+  );
+
+  it.effect(
+    "flags unclosed ClickHouse quotes, heredocs, and nested or trailing comments",
+    () =>
+      Effect.sync(() => {
+        for (const sql of [
+          "SELECT 'oops\\",
+          'SELECT "oops',
+          "SELECT `oops",
+          "SELECT “oops",
+          "SELECT ‘oops",
+          "SELECT $tag$oops$$",
+        ]) {
+          expect(scanSqlScript(sql, "clickhouse")[0]!.unterminated).toBe("quote");
+        }
+        for (const sql of ["SELECT 1 /* outer /* inner */", "/* oops", "SELECT 1; /* oops"]) {
+          expect(scanSqlScript(sql, "clickhouse").at(-1)!.unterminated).toBe("comment");
+        }
+      }),
+    tags,
+  );
+
   it.effect(
     "keeps `code` aligned with `sql` across leading whitespace and comments",
     () =>

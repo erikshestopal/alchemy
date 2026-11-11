@@ -3,7 +3,7 @@
  * `splitSqliteStatements` (in `SqlFile.ts`), which also understands trigger
  * bodies.
  */
-export type ScriptDialect = "postgres" | "mysql" | "googlesql";
+export type ScriptDialect = "postgres" | "mysql" | "googlesql" | "clickhouse";
 
 /** One statement of a script, without its terminating `;`. */
 export interface ScannedStatement {
@@ -29,9 +29,9 @@ interface Rules {
   readonly hashComments: boolean;
   /** `--` is a comment only when followed by whitespace (MySQL). */
   readonly dashCommentNeedsSpace: boolean;
-  /** Block comments nest (PostgreSQL). */
+  /** Block comments nest (PostgreSQL and ClickHouse). */
   readonly nestedBlockComments: boolean;
-  /** `$tag$ … $tag$` bodies (PostgreSQL). */
+  /** `$tag$ … $tag$` bodies (PostgreSQL and ClickHouse). */
   readonly dollarQuotes: boolean;
   /** `'''…'''` and `"""…"""` (GoogleSQL). */
   readonly tripleQuotes: boolean;
@@ -42,6 +42,15 @@ interface Rules {
 }
 
 const RULES: Record<ScriptDialect, Rules> = {
+  clickhouse: {
+    hashComments: true,
+    dashCommentNeedsSpace: false,
+    nestedBlockComments: true,
+    dollarQuotes: true,
+    tripleQuotes: false,
+    quotes: ["'", '"', "`", "“", "‘"],
+    backslashEscapes: true,
+  },
   postgres: {
     hashComments: false,
     dashCommentNeedsSpace: false,
@@ -135,7 +144,8 @@ const isWordChar = (ch: string | undefined) => ch !== undefined && /[A-Za-z0-9_]
  * Split a SQL script into statements on top-level `;`. Semicolons inside
  * strings, quoted identifiers, dollar-quoted bodies, and comments never
  * split, and each dialect's quoting and comment rules apply. Empty
- * statements are dropped.
+ * statements are dropped, except unclosed ClickHouse comments, so callers
+ * can reject the entire script before executing any statements.
  *
  * This is a lexer, not a parser: it does not understand statement bodies
  * that contain their own `;` outside quotes (procedural blocks), which
@@ -152,7 +162,7 @@ export const scanSqlScript = (
   let code = "";
   let unterminated: ScannedStatement["unterminated"];
   const push = (end: number) => {
-    if (code.trim().length > 0) {
+    if (code.trim().length > 0 || (dialect === "clickhouse" && unterminated)) {
       statements.push({
         sql: sql.slice(start, end),
         text: text.trim(),
@@ -176,7 +186,11 @@ export const scanSqlScript = (
       ch === "-" &&
       next === "-" &&
       (!rules.dashCommentNeedsSpace || i + 2 >= sql.length || /\s/.test(sql[i + 2]!));
-    if (dashComment || (rules.hashComments && ch === "#")) {
+    if (
+      dashComment ||
+      (rules.hashComments && ch === "#") ||
+      (dialect === "clickhouse" && ch === "/" && next === "/")
+    ) {
       const end = endOfLine(sql, i);
       code += blank(sql.slice(i, end));
       text += " ";
@@ -212,11 +226,13 @@ export const scanSqlScript = (
           ?.toLowerCase() ?? "";
       const raw = dialect === "googlesql" && ["r", "rb", "br"].includes(prefix);
       const escaped = dialect === "postgres" && prefix === "e" && ch === "'";
+      const unicodeClose = ch === "“" ? "”" : ch === "‘" ? "’" : undefined;
       const close =
-        rules.tripleQuotes && ch !== "`" && sql.startsWith(ch.repeat(3), i) ? ch.repeat(3) : ch;
+        unicodeClose ??
+        (rules.tripleQuotes && ch !== "`" && sql.startsWith(ch.repeat(3), i) ? ch.repeat(3) : ch);
       const span = quoted(sql, i, close, {
-        backslashEscapes: !raw && (rules.backslashEscapes || escaped),
-        doubledEscapes: dialect !== "googlesql",
+        backslashEscapes: !unicodeClose && !raw && (rules.backslashEscapes || escaped),
+        doubledEscapes: !unicodeClose && dialect !== "googlesql",
       });
       if (!span.closed) unterminated = "quote";
       code += mask(sql.slice(i, span.end));

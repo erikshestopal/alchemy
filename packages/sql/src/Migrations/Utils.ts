@@ -43,6 +43,9 @@ export const sqlLiteral = (value: unknown, dialect?: MigrationDialect): string =
   }
   if (typeof value === "boolean") return value ? "1" : "0";
   const text = value instanceof Date ? value.toISOString() : scalarText(value);
+  if (dialect === "clickhouse") {
+    return `'${text.replaceAll("\\", "\\\\").replaceAll("'", "''")}'`;
+  }
   // GoogleSQL escapes with backslashes; `''` is two adjacent literals.
   return dialect === "googlesql"
     ? `'${text.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`
@@ -73,6 +76,10 @@ export const inlineSqlParams = (
     const ch = sql[i];
     if (quote) {
       out += ch;
+      if (dialect === "clickhouse" && ch === "\\" && i + 1 < sql.length) {
+        out += sql[++i];
+        continue;
+      }
       if (ch === quote) quote = undefined;
       continue;
     }
@@ -82,7 +89,7 @@ export const inlineSqlParams = (
       continue;
     }
     if (ch === "?" && paramIndex < params.length) {
-      out += sqlLiteral(params[paramIndex++]);
+      out += sqlLiteral(params[paramIndex++], dialect === "clickhouse" ? dialect : undefined);
       continue;
     }
     out += ch;
@@ -94,7 +101,7 @@ export const inlineSqlParams = (
 export const quoteIdentifier = (identifier: string, dialect: MigrationDialect): string =>
   dialect === "mysql"
     ? `\`${identifier.replaceAll("`", "``")}\``
-    : dialect === "googlesql"
+    : dialect === "googlesql" || dialect === "clickhouse"
       ? `\`${identifier.replaceAll("\\", "\\\\").replaceAll("`", "\\`")}\``
       : `"${identifier.replaceAll('"', '""')}"`;
 

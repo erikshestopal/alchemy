@@ -36,6 +36,14 @@ const createTableSql = (
 ): string => {
   const quoted = quoteIdentifier(table, dialect);
   switch (dialect) {
+    case "clickhouse":
+      return `CREATE TABLE IF NOT EXISTS ${quoted} (
+  id UUID DEFAULT generateUUIDv4(),
+  hash String,
+  created_at Nullable(Int64),
+  name Nullable(String),
+  applied_at DateTime64 DEFAULT now64()
+) ENGINE = MergeTree() ORDER BY id;`;
     case "sqlite":
       return `CREATE TABLE IF NOT EXISTS ${quoted} (
   id INTEGER PRIMARY KEY,
@@ -92,7 +100,8 @@ const insertSql = (
     dialect === "sqlite"
       ? bookkeepingColumns(dialect, "hash", "created_at", "name", "applied_at")
       : bookkeepingColumns(dialect, "hash", "created_at", "name");
-  return `INSERT INTO ${quoted} (${columns}) VALUES (${sqlLiteral(record.hash, dialect)}, ${sqlLiteral(record.createdAtMillis ?? null, dialect)}, ${sqlLiteral(record.name, dialect)}${applied});`;
+  const settings = dialect === "clickhouse" ? " SETTINGS async_insert = 0" : "";
+  return `INSERT INTO ${quoted} (${columns})${settings} VALUES (${sqlLiteral(record.hash, dialect)}, ${sqlLiteral(record.createdAtMillis ?? null, dialect)}, ${sqlLiteral(record.name, dialect)}${applied});`;
 };
 
 const renameSql = (from: string, to: string, dialect: MigrationDialect): string =>
@@ -285,6 +294,14 @@ const carryRenames = (options: {
       if (lookupApplied(applied, record.name)) continue;
       const index = orphans.findIndex(([, hash]) => hash === record.hash);
       if (index === -1) continue;
+      if (executor.dialect === "clickhouse") {
+        return yield* new MigrationError({
+          message:
+            `Cannot rename applied migration "${orphans[index][0]}" to "${record.name}" ` +
+            `in "${table}" on ClickHouse. Keep the applied file's original name and ` +
+            "add a new forward migration instead.",
+        });
+      }
       const [from] = orphans.splice(index, 1)[0];
       const column = bookkeepingColumns(executor.dialect, "name");
       updates.push(
@@ -340,7 +357,8 @@ const applyPending = (options: {
  * An already-applied name whose local hash changed, or a recorded name
  * with no local file, is a hard {@link RewrittenMigrationHistoryError}
  * rather than a silent skip that would persist the new hashes. A file
- * renamed with unchanged contents keeps its applied row. A pending file
+ * renamed with unchanged contents keeps its applied row, except on
+ * ClickHouse, which rejects applied-file renames before writing. A pending file
  * that sorts before an applied one is a
  * {@link NonLinearMigrationHistoryError}: fresh databases would run the
  * two in the opposite order.
