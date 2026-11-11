@@ -27,6 +27,7 @@
   "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
+    "./SQL": "./src/SQL/index.ts",
     "./*": "./src/*.ts",
     "./package.json": "./package.json"
   },
@@ -38,6 +39,13 @@
         "worker": "./src/index.ts",
         "default": "./lib/index.js"
       },
+      "./SQL": {
+        "types": "./lib/SQL/index.d.ts",
+        "bun": "./src/SQL/index.ts",
+        "worker": "./src/SQL/index.ts",
+        "default": "./lib/SQL/index.js"
+      },
+      "./SQL/internal/*": null,
       "./*/internal": null,
       "./*": {
         "types": "./lib/*.d.ts",
@@ -54,6 +62,7 @@
     "build:package": "node scripts/build.ts"
   },
   "dependencies": {
+    "@alchemy.run/sql": "workspace:*",
     "@distilled.cloud/clickhouse": "workspace:*",
     "@distilled.cloud/core": "workspace:*"
   },

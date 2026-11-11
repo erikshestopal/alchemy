@@ -10,6 +10,7 @@
   "references": [
     { "path": "../../submodules/distilled/packages/clickhouse/tsconfig.json" },
     { "path": "../../submodules/distilled/packages/core/tsconfig.json" },
-    { "path": "../alchemy/tsconfig.json" }
+    { "path": "../alchemy/tsconfig.json" },
+    { "path": "../sql/tsconfig.json" }
   ]
 }

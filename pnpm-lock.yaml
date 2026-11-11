@@ -9083,6 +9083,9 @@ importers:
 
   packages/clickhouse:
     dependencies:
+      '@alchemy.run/sql':
+        specifier: workspace:*
+        version: link:../sql
       '@distilled.cloud/clickhouse':
         specifier: workspace:*
         version: link:../../submodules/distilled/packages/clickhouse

@@ -6,12 +6,13 @@ import * as Layer from "effect/Layer";
 import { ClickHouseAuth } from "./AuthProvider.ts";
 import * as Credentials from "./Credentials.ts";
 import { Service, ServiceProvider } from "./Service.ts";
+import { Database, DatabaseProvider } from "./SQL/Database.ts";
 
 export class Providers extends Provider.ProviderCollection<Providers>()("ClickHouse") {}
 
 const makeProviders = () =>
-  Layer.effect(Providers, Provider.collection([Service])).pipe(
-    Layer.provide(ServiceProvider()),
+  Layer.effect(Providers, Provider.collection([Service, Database])).pipe(
+    Layer.provide(Layer.mergeAll(ServiceProvider(), DatabaseProvider())),
     Layer.provideMerge(Credentials.fromAuthProvider()),
     Layer.provideMerge(FetchHttpClient.layer),
     Layer.provideMerge(ClickHouseAuth),
@@ -22,5 +23,5 @@ const makeProviders = () =>
 
 let cached: ReturnType<typeof makeProviders> | undefined;
 
-/** ClickHouse services, HTTP client and profile-aware credentials. */
+/** ClickHouse databases, HTTP client and profile-aware credentials. */
 export const providers = () => (cached ??= makeProviders());
