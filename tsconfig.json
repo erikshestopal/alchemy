@@ -389,6 +389,12 @@
       "path": "./examples/cloudflare-planetscale-mysql-drizzle/tsconfig.json"
     },
     {
+      "path": "./examples/clickhouse-service/tsconfig.json"
+    },
+    {
+      "path": "./examples/clickhouse-sql/tsconfig.json"
+    },
+    {
       "path": "./examples/cloudflare-planetscale-postgres-drizzle/tsconfig.json"
     },
     {

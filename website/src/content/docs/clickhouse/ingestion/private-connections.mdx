@@ -1,0 +1,130 @@
+---
+title: Private ClickPipes connections and scaling
+description: Connect ClickPipes to private sources and manage shared database ingestion capacity.
+---
+
+:::caution[Verification limits]
+Earlier SSH key and public S3 lifecycles passed against a disposable Cloud
+service; the current recovery and replacement changes need fresh live runs.
+Bastion connectivity and reverse endpoints remain unverified. CDC scaling
+requires an existing CDC pipe; source-side teardown remains unverified.
+:::
+
+ClickPipes can reach a source through a reverse private endpoint or an SSH
+bastion. Database ClickPipes in the same service share one CDC scaling control.
+
+## Connect a private endpoint
+
+Create an endpoint in the ClickHouse service, then accept it in the source
+cloud when the status is `PendingAcceptance`. `Ready` does not mean every DNS
+target is already available.
+
+```typescript
+// alchemy.run.ts
+import * as Alchemy from "alchemy";
+import * as ClickHouse from "@alchemy.run/clickhouse";
+import * as Effect from "effect/Effect";
+
+export default Alchemy.Stack(
+  "PrivateSource",
+  { providers: ClickHouse.providers(), state: Alchemy.localState() },
+  Effect.gen(function* () {
+    return yield* ClickHouse.ClickPipes.ReversePrivateEndpoint("Source", {
+      organizationId: "your-organization-uuid",
+      serviceId: "your-service-uuid",
+      description: "Private source",
+      target: {
+        type: "VPC_ENDPOINT_SERVICE",
+        vpcEndpointServiceName: "your-vpc-endpoint-service-name",
+      },
+    });
+  }),
+);
+```
+
+The other target types are AWS VPC resources, MSK multi-VPC and GCP Private
+Service Connect attachments. Changing the target or description replaces the
+endpoint and removes the old connection first. Omit DNS mappings to leave them
+unchanged; an empty array requests their removal. If the API omits the current
+mapping set, Alchemy refuses to guess it.
+
+New endpoints carry an `[alchemy:<sha256>]` description suffix identifying the
+full stack, stage, resource name, generation and immutable configuration.
+Keep it intact: a fresh deploy uses an exact marker match to recover an
+interrupted create, never a matching target alone. Leave 75 characters for
+the suffix within the 255-character description limit.
+
+Creates and deletes are not automatically retried; absolute DNS assignments
+retain bounded transient retries. Inspect ambiguous results and back up state
+before manual recovery. An older unmarked endpoint requires its exact
+UUID and `Alchemy.AdoptPolicy.adopt(true)`; owning its service is not enough.
+Remove a pinned UUID before requesting replacement; keeping it fails before
+the old endpoint is deleted.
+
+## Generate an SSH key
+
+ClickHouse keeps the private key. Install the returned public key on the
+bastion before explicitly validating connectivity; creation does not validate it.
+
+```typescript
+// alchemy.run.ts
+import * as Alchemy from "alchemy";
+import * as ClickHouse from "@alchemy.run/clickhouse";
+import * as Effect from "effect/Effect";
+
+export default Alchemy.Stack(
+  "BastionKey",
+  { providers: ClickHouse.providers(), state: Alchemy.localState() },
+  Effect.gen(function* () {
+    return yield* ClickHouse.ClickPipes.SshKey("Bastion", {
+      organizationId: "your-organization-uuid",
+      serviceId: "your-service-uuid",
+      host: "bastion.example.com",
+      port: 22,
+      username: "clickpipes",
+    });
+  }),
+);
+```
+
+SSH key settings are immutable. Replacement deletes the old key first and
+requires installing the new public key. Remove a pinned UUID before requesting
+replacement. The `validateSshKey` action runs a
+separate connectivity check after installation. These five SSH API operations
+are documented by the ClickHouse Terraform provider rather than the published
+OpenAPI specification.
+New keys carry the same ownership suffix in their description. An exact marker
+match can recover an interrupted create; matching the name cannot. Older
+unmarked keys require their exact UUID and `Alchemy.AdoptPolicy.adopt(true)`.
+Back up state and inspect the live key before manual recovery.
+
+## Manage database ingestion capacity
+
+Adopt the existing service-wide CDC scaler after a database ClickPipe has been
+provisioned. Streaming pipes use separate scaling.
+
+```typescript
+// alchemy.run.ts
+import * as Alchemy from "alchemy";
+import * as ClickHouse from "@alchemy.run/clickhouse";
+import * as Effect from "effect/Effect";
+
+export default Alchemy.Stack(
+  "DatabaseIngestion",
+  { providers: ClickHouse.providers(), state: Alchemy.localState() },
+  Effect.gen(function* () {
+    return yield* ClickHouse.ClickPipes.CdcScaling("SharedScaling", {
+      organizationId: "your-organization-uuid",
+      serviceId: "your-service-uuid",
+      replicaCpuMillicores: 2000,
+      replicaMemoryGb: 8,
+    }).pipe(Alchemy.AdoptPolicy.adopt(true));
+  }),
+);
+```
+
+Use one control per service. Adoption records the original scaling; destroy
+restores it only when it has not been changed by another writer. The API has no
+conditional write, so serialize changes. Reconciliation waits for the API to
+report the requested configuration, with a separate bounded scaling budget.
+That does not prove ingestion throughput or source connectivity.

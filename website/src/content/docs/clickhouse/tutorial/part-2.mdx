@@ -1,0 +1,192 @@
+---
+title: "Part 2: Add a Worker"
+description: Connect an authenticated Cloudflare Worker to ClickHouse using a separately granted SQL identity.
+sidebar:
+  order: 2
+---
+
+import PackageManagers from "../../../../components/PackageManagers.astro";
+
+The Worker runs on Cloudflare, not ClickHouse. `SQL.Connect` supplies an HTTPS
+client using an existing SQL identity; it creates no user, role or grant.
+
+## Connect Cloudflare
+
+<PackageManagers run="alchemy profile edit --add Cloudflare" />
+
+Use the same profile as ClickHouse. See [Cloudflare setup](/cloudflare/setup).
+
+## Supply application secrets
+
+Set `CLICKHOUSE_APP_USERNAME` to a separate SQL user, never `default`. Supply its
+`CLICKHOUSE_APP_PASSWORD` and a private `CLICKHOUSE_HTTP_TOKEN` of at least 32
+characters through [secret providers](/environments/secret-providers).
+
+The SQL user's grants are the permission boundary, not the default database or
+the client's method names. All code in the Worker can access its injected secrets.
+
+## Create an authenticated Worker
+
+```typescript
+// src/Api.ts
+import * as Cloudflare from "@alchemy.run/cloudflare";
+import * as Config from "effect/Config";
+import * as Effect from "effect/Effect";
+import { HttpServerRequest } from "effect/http/HttpServerRequest";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
+import * as Redacted from "effect/Redacted";
+
+export default class Api extends Cloudflare.Worker<Api>()(
+  "Api",
+  { main: import.meta.url },
+  Effect.gen(function* () {
+    const token = yield* Config.Redacted("CLICKHOUSE_HTTP_TOKEN");
+    if (Redacted.value(token).length < 32) {
+      return yield* Effect.die(new Error("Supply an HTTP token of at least 32 characters."));
+    }
+    return {
+      fetch: Effect.gen(function* () {
+        const request = yield* HttpServerRequest;
+        if (request.headers.authorization !== `Bearer ${Redacted.value(token)}`) {
+          return HttpServerResponse.empty({ status: 401 });
+        }
+        return HttpServerResponse.empty({ status: 404 });
+      }).pipe(Effect.orDie),
+    };
+  }),
+) {}
+```
+
+Authentication runs before database access. The HTTP token is separate from the
+SQL password.
+
+## Bind the database connection
+
+Import the database declarations, then bind the supplied SQL identity:
+
+```diff lang="typescript"
+// src/Api.ts
++import * as ClickHouse from "@alchemy.run/clickhouse";
++import { Database, Service } from "./database.ts";
+    const token = yield* Config.Redacted("CLICKHOUSE_HTTP_TOKEN");
++    const service = yield* Service;
++    const database = yield* Database;
++    const username = yield* Config.String("CLICKHOUSE_APP_USERNAME");
++    const password = yield* Config.Redacted("CLICKHOUSE_APP_PASSWORD");
++    if (!username || username === "default") {
++      return yield* Effect.die(new Error("Supply a separate application SQL identity."));
++    }
++    const sql = yield* ClickHouse.SQL.Connect("Application", service, {
++      username,
++      password,
++      database: database.name,
++    });
+-  }),
++  }).pipe(Effect.provide(ClickHouse.SQL.ConnectHttp)),
+```
+
+The static connection name is unique within this host. `ConnectHttp` injects
+the supplied credentials, not Cloud management keys or the service's initial password.
+
+## Read events
+
+Insert this route after the authorization guard:
+
+```diff lang="typescript"
+// src/Api.ts
++        if (request.method === "GET" && request.url === "/events") {
++          const rows = yield* sql.query({
++            sql: "SELECT currentUser() AS username, currentDatabase() AS database, message FROM events ORDER BY message SETTINGS select_sequential_consistency = 1",
++          });
++          return yield* HttpServerResponse.json(rows);
++        }
+        return HttpServerResponse.empty({ status: 404 });
+```
+
+Each row reports the actual SQL user and database alongside the event.
+
+## Insert an event
+
+Add a POST route before the final 404:
+
+```diff lang="typescript"
+// src/Api.ts
++        if (request.method === "POST" && request.url === "/events") {
++          const message = yield* request.text;
++          if (message.length === 0 || message.length > 4096) {
++            return HttpServerResponse.empty({ status: 400 });
++          }
++          yield* sql.command({
++            sql: "INSERT INTO events (message) SETTINGS async_insert = 0 VALUES ({message:String})",
++            parameters: { message },
++          });
++          return HttpServerResponse.empty({ status: 204 });
++        }
+        return HttpServerResponse.empty({ status: 404 });
+```
+
+Typed parameters keep SQL-looking text as data. Do not retry uncertain writes:
+a lost response can mean the insert committed. Add request-size and abuse
+controls before using this demonstration publicly.
+
+## Report SQL failures
+
+Replace the handler's final `Effect.orDie` with a typed SQL error response:
+
+```diff lang="typescript"
+// src/Api.ts
+        return HttpServerResponse.empty({ status: 404 });
+-      }).pipe(Effect.orDie),
++      }).pipe(
++        Effect.catchTag(["ClickHouseSqlError", "ClickHouseSqlTransportError"], (error) =>
++          HttpServerResponse.json({ error: error._tag }, { status: 502 }),
++        ),
++        Effect.orDie,
++      ),
+```
+
+Return only the error tag; SQL error messages can contain query details.
+
+## Register Cloudflare resources
+
+```diff lang="typescript"
+// alchemy.run.ts
++import * as Cloudflare from "@alchemy.run/cloudflare";
++import * as Layer from "effect/Layer";
+-  { providers: ClickHouse.providers(), state: Alchemy.localState() },
++  {
++    providers: Layer.mergeAll(ClickHouse.providers(), Cloudflare.providers()),
++    state: Alchemy.localState(),
++  },
+```
+
+The stack now has both providers; ClickHouse still owns only its database resources.
+
+## Add the Worker to the stack
+
+```diff lang="typescript"
+// alchemy.run.ts
++import Api from "./src/Api.ts";
+    const database = yield* Database;
++    const api = yield* Api;
+    return {
++      url: api.url.as<string>(),
+```
+
+The Worker URL is an output; passwords are not.
+
+## Deploy the Worker
+
+<PackageManagers run="alchemy deploy --stage dev" />
+
+SQL access will fail until an administrator configures the application grants.
+A successful control-plane deploy alone does not verify the cross-cloud runtime path.
+
+## Grant application SQL access
+
+Use an authorized SQL administrator on the output service. Create or select the
+supplied application identity and grant `SELECT` and `INSERT` on the output
+database's `events` table. Remove unwanted grants on other tables or databases.
+Do not assume the initial `default` user can create users or delegate grants.
+
+Next: [Testing](/clickhouse/tutorial/part-3).

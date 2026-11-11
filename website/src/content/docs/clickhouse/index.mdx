@@ -1,0 +1,91 @@
+---
+title: ClickHouse Cloud
+description: Manage ClickHouse Cloud services, SQL databases, migrations and ingestion with Alchemy.
+---
+
+import HubMap from "../../../components/HubMap.astro";
+
+ClickHouse is a column-oriented SQL database for analytical queries. ClickHouse
+Cloud runs it as a managed service, with compute, storage and ingestion controls.
+
+Alchemy supports Cloud services, SQL databases with deploy-time migrations,
+SQL connections from other providers' runtimes, ClickPipes and selected service
+settings. It does not host application code on ClickHouse.
+
+Start with [What is ClickHouse?](/clickhouse/what-is-clickhouse).
+
+## A quick example
+
+```typescript
+// alchemy.run.ts
+import * as ClickHouse from "@alchemy.run/clickhouse";
+import * as Alchemy from "alchemy";
+import * as RemovalPolicy from "alchemy/RemovalPolicy";
+import * as Effect from "effect/Effect";
+
+export default Alchemy.Stack(
+  "Analytics",
+  { providers: ClickHouse.providers(), state: Alchemy.localState() },
+  Effect.gen(function* () {
+    const service = yield* ClickHouse.Service("Analytics", {
+      organizationId: "your-organization-uuid",
+      provider: "aws",
+      region: "us-east-1",
+      minReplicaMemoryGb: 8,
+      maxReplicaMemoryGb: 8,
+      numReplicas: 1,
+      idleScaling: true,
+      idleTimeoutMinutes: 5,
+      ipAccessList: [{ source: "192.0.2.10/32", description: "Replace with your application IP" }],
+    }).pipe(RemovalPolicy.retain());
+    return { serviceId: service.serviceId };
+  }),
+);
+```
+
+Replace the example CIDR with your SQL client's egress IP. Retention prevents
+destroy from deleting this service; retained compute remains billable.
+Protect state: ClickHouse reveals its initial SQL password only once.
+
+## Where to start
+
+- [Setup](/clickhouse/setup) connects deployment credentials.
+- [The tutorial](/clickhouse/tutorial/part-1) builds a database, adds an external Worker, then covers testing, stages and CI/CD.
+- [SQL databases and connections](/clickhouse/services/sql) covers migrations, retention and separately granted application credentials.
+- [ClickPipes ingestion](/clickhouse/ingestion/clickpipes) shows public S3 ingestion and the limits of other source families.
+
+## Verification limits
+
+Service configuration lifecycles passed on AWS, GCP and Azure. Separate cases
+passed partial updates, replacement, adoption, interrupted creation and drift
+repair. SQL database lifecycles passed migration durability, ownership, retention
+and recovery checks. SSH key, scaling schedule and native backup-policy cases
+also passed against Cloud.
+
+This is not a completed provider-wide run. Current ClickPipes ingestion changes
+still need live verification; earlier evidence covers public S3 only. CDC scaling
+and reverse private endpoints need isolated external fixtures. Service settings
+need vendor enablement. A local Worker exercised SQL reads, inserts and grant
+denials against Cloud; delivery to a deployed Worker remains unverified.
+
+## Out of scope
+
+The user-selected scope is ClickHouse databases and ingestion. Organization
+administration, Cloud API key resources, ClickStack, saved queries, Query API
+endpoints, service query endpoints, JWT providers, replica-aware routing,
+snapshot controls, backup bucket controls and upgrade windows are excluded.
+
+UDFs, ClickHouse-hosted Functions, managed PostgreSQL and BYOC are also excluded
+by user choice, not pending Alchemy deliverables. PostgreSQL ingestion through
+ClickPipes remains in scope: it connects an existing source rather than creating
+a PostgreSQL database. The distilled SDK keeps the broader API surface; SDK
+coverage does not imply Alchemy support.
+
+Cloud `Service`, `SQL.Database`, the separate `SQL.Connect` binding,
+`ClickPipes`, `ServiceSetting`, `ScalingSchedule` and `BackupConfiguration`
+remain in scope. Workers and Functions on other providers may connect over SQL;
+they are not ClickHouse-hosted runtimes.
+
+## The docs
+
+<HubMap />

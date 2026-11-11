@@ -1,0 +1,185 @@
+---
+title: "Part 1: Your first database"
+description: Create a ClickHouse Cloud service and SQL database, then apply committed migrations.
+sidebar:
+  order: 1
+---
+
+import PackageManagers from "../../../../components/PackageManagers.astro";
+
+Build an event journal with a ClickHouse database and an authenticated external
+Worker. The complete project is
+[`examples/clickhouse-sql`](https://github.com/alchemy-run/alchemy/tree/main/examples/clickhouse-sql).
+The deployed Worker path remains unverified; these instructions are not a passing live-test report.
+
+## Prepare access
+
+Use [Node.js](https://nodejs.org) 24.11.1+ or [Bun](https://bun.sh), installed
+workspace dependencies and a ClickHouse Cloud account. An authorized SQL
+administrator must configure application users and grants later.
+The example's 8 GiB service incurs Cloud usage charges.
+
+From `examples/clickhouse-sql`, configure the deployment profile:
+
+<PackageManagers run="alchemy profile edit --add ClickHouse" />
+
+See [Setup](/clickhouse/setup) for the management key and secret.
+
+## Configure SQL network access
+
+Supply these example settings through your environment, an ignored `.env`, or a
+[secret provider](/environments/secret-providers):
+
+| Setting | Meaning |
+| --- | --- |
+| `CLICKHOUSE_ORGANIZATION_ID` | Organization UUID for the service. |
+| `CLICKHOUSE_DEPLOY_CIDR` | Deployment machine's public egress CIDR. |
+| `CLICKHOUSE_WORKER_CIDR` | CIDR permitting the eventual Worker's SQL egress. |
+
+A normal Worker has no single fixed egress address. For a disposable exercise,
+`0.0.0.0/0` permits IPv4 SQL access from anywhere; authentication is still required.
+Do not use it as a production network policy. Cloudflare's inbound proxy IP
+ranges are not Worker egress ranges. Keep deployment SQL access available.
+
+## Declare the service
+
+```typescript
+// src/database.ts
+import * as ClickHouse from "@alchemy.run/clickhouse";
+import * as RemovalPolicy from "alchemy/RemovalPolicy";
+import * as Config from "effect/Config";
+import * as Effect from "effect/Effect";
+
+export const Service = Effect.gen(function* () {
+  const organizationId = yield* Config.String("CLICKHOUSE_ORGANIZATION_ID");
+  const deployCidr = yield* Config.String("CLICKHOUSE_DEPLOY_CIDR");
+  const workerCidr = yield* Config.String("CLICKHOUSE_WORKER_CIDR");
+  const destroyData = yield* Config.Boolean("CLICKHOUSE_SQL_DESTROY_DATA").pipe(
+    Config.withDefault(false),
+  );
+  return yield* ClickHouse.Service("Service", {
+    organizationId,
+    provider: "aws",
+    region: "us-east-1",
+    minReplicaMemoryGb: 8,
+    maxReplicaMemoryGb: 8,
+    numReplicas: 1,
+    idleScaling: true,
+    idleTimeoutMinutes: 5,
+    ipAccessList: [
+      { source: deployCidr, description: "Deployment SQL access" },
+      { source: workerCidr, description: "Worker SQL access" },
+    ],
+  }).pipe(RemovalPolicy.retain(!destroyData));
+});
+```
+
+Retention defaults to enabled so deleting the stack cannot silently destroy a
+retained database through its parent. Retained compute remains billable.
+
+## Declare the database
+
+Append the database declaration to the same file and add the `Output` import:
+
+```diff lang="typescript"
+// src/database.ts
++import * as Output from "alchemy/Output";
++
++export const Database = Effect.gen(function* () {
++  const service = yield* Service;
++  const destroyData = yield* Config.Boolean("CLICKHOUSE_SQL_DESTROY_DATA").pipe(
++    Config.withDefault(false),
++  );
++  return yield* ClickHouse.SQL.Database("Analytics", {
++    organizationId: service.organizationId,
++    serviceId: service.serviceId,
++    username: "default",
++    password: service.password.pipe(
++      Output.mapEffect((password) =>
++        password
++          ? Effect.succeed(password)
++          : Effect.die(new Error("The example requires its saved initial SQL password.")),
++      ),
++    ),
++    dropOnDelete: destroyData,
++  });
++});
+```
+
+The initial service password is deployment-only. `Output.mapEffect` waits for
+that one-time secret and refuses an absent value; protect the saved state.
+Ownership-tag recovery can find an interrupted service, but never recovers or
+resets a lost password. Restore saved state or explicitly supply another
+authorized SQL credential to `SQL.Database` before continuing.
+
+## Define the events table
+
+```sql
+-- migrations/0001_events.sql
+CREATE TABLE events (
+  message String
+) ENGINE = MergeTree ORDER BY message;
+```
+
+Migrations run in the managed database. Do not add `USE` or transaction statements.
+
+## Seed an event
+
+```sql
+-- migrations/0002_seed.sql
+INSERT INTO events (message) SETTINGS async_insert = 0 VALUES ('baseline');
+```
+
+The seed uses synchronous acknowledgment and runs once, not on every deployment.
+
+## Attach the migrations
+
+```diff lang="typescript"
+// src/database.ts
++    migrations: "./migrations",
+    dropOnDelete: destroyData,
+```
+
+Commit these files before deploying. Add new files for later changes; never
+edit, rename or remove applied ones. ClickHouse DDL is nontransactional: a
+failed or uncertain statement requires inspection and progress repair, not
+automatic replay. See [migration recovery](/clickhouse/services/sql#apply-deploy-time-migrations).
+
+## Create the stack
+
+```typescript
+// alchemy.run.ts
+import * as ClickHouse from "@alchemy.run/clickhouse";
+import * as Alchemy from "alchemy";
+import * as Effect from "effect/Effect";
+import { Database, Service } from "./src/database.ts";
+
+export default Alchemy.Stack(
+  "ClickHouseSqlExample",
+  { providers: ClickHouse.providers(), state: Alchemy.localState() },
+  Effect.gen(function* () {
+    const service = yield* Service;
+    const database = yield* Database;
+    return {
+      organizationId: service.organizationId,
+      serviceId: service.serviceId,
+      database: database.name,
+      databaseUuid: database.uuid,
+    };
+  }),
+);
+```
+
+The outputs identify the service and SQL database without exposing the password.
+When following the complete example, keep its Worker files for Part 2.
+
+## Deploy the database
+
+<PackageManagers run="alchemy deploy --stage dev" />
+
+Keep the same profile, stage and state directory for later commands. A timeout
+is a failure, not readiness. Service readiness has a five-minute polling budget.
+A fresh deploy can recover its generation through the reserved ownership tags,
+not its display name. Keep the same declaration and inspect state before retrying.
+
+Next: [Add a Worker](/clickhouse/tutorial/part-2).

@@ -1,0 +1,48 @@
+---
+title: Setup
+description: Connect Alchemy to ClickHouse Cloud with an API key and secret.
+---
+
+import PackageManagers from "../../../components/PackageManagers.astro";
+
+## Install the provider
+
+<PackageManagers add="@alchemy.run/clickhouse" />
+
+See the [overview](/clickhouse) for the database-and-ingestion scope and
+verification limits.
+
+## Create management credentials
+
+Create an API key in your ClickHouse Cloud organization's settings. To manage
+services or ingestion, give it the corresponding permissions on the target
+organization and services. Alchemy does not create this key or manage its roles.
+Do not use the service's SQL username and password for management requests.
+
+## Store a profile
+
+<PackageManagers run="alchemy profile edit --add ClickHouse" />
+
+Enter the Cloud API key and secret at the private prompts. A profile stores
+credentials, not the deployment destination; pass `organizationId` on resources.
+See [Profiles](/environments/profiles) for profile selection.
+
+## Configure CI
+
+Set `CLICKHOUSE_CLOUD_API_KEY` and `CLICKHOUSE_CLOUD_API_SECRET` in your CI
+secret store. Profiles are bypassed when `CI=true`.
+
+The default management host is `https://api.clickhouse.cloud`. Only override
+`CLICKHOUSE_CLOUD_API_BASE_URL` for a trusted API endpoint: it receives your
+authorization credentials. Pass `organizationId` explicitly on each resource.
+
+## Supply SQL credentials separately
+
+`SQL.Database` needs an existing SQL user authorized for database DDL and
+migrations. `SQL.Connect` needs a separately granted application user.
+Neither resource creates users or grants. The SQL endpoint must allow the
+deploying machine and runtime through the service's IP access policy.
+
+Use [secret providers](/environments/secret-providers), including Doppler,
+Infisical or per-stage secrets, for SQL passwords. Protect the state store:
+new services reveal their initial password only once.

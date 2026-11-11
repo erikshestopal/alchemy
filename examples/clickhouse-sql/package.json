@@ -1,0 +1,22 @@
+{
+  "name": "clickhouse-sql",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "alchemy deploy",
+    "destroy": "alchemy destroy",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@alchemy.run/clickhouse": "workspace:*",
+    "@alchemy.run/cloudflare": "workspace:*",
+    "alchemy": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@alchemy.run/test": "workspace:*",
+    "@distilled.cloud/clickhouse": "workspace:*",
+    "@types/bun": "catalog:"
+  }
+}

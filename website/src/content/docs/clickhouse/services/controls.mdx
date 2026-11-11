@@ -1,0 +1,82 @@
+---
+title: Service controls
+description: Schedule scaling and manage individual ClickHouse service settings.
+---
+
+:::caution[Verification limits]
+Scaling schedule creation, update and removal passed against a disposable Cloud
+service without changing baseline sizing. This does not verify every sizing
+combination. The service-settings API requires organization enablement.
+:::
+
+## Schedule scaling
+
+A scaling schedule replaces the service's complete weekly schedule. The
+service's baseline scaling remains separate. Each entry has UTC weekdays and
+hours and can inherit fields from that baseline. Scheduled actions are
+best-effort and may need additional organization entitlements.
+
+```typescript
+// alchemy.run.ts
+import * as ClickHouse from "@alchemy.run/clickhouse";
+import * as Alchemy from "alchemy";
+import * as Effect from "effect/Effect";
+
+export default Alchemy.Stack(
+  "WorkdayScaling",
+  { providers: ClickHouse.providers(), state: Alchemy.localState() },
+  Effect.gen(function* () {
+    return yield* ClickHouse.ScalingSchedule("Workday", {
+      organizationId: "your-organization-uuid",
+      serviceId: "your-service-uuid",
+      entries: [{
+        name: "workday",
+        weekdays: [1, 2, 3, 4, 5],
+        startHourUtc: 9,
+        endHourUtc: 17,
+        minReplicaMemoryGb: 16,
+        maxReplicaMemoryGb: 16,
+      }],
+    });
+  }),
+);
+```
+
+An existing schedule needs `Alchemy.AdoptPolicy.adopt(true)`. Destroy
+restores adopted entries or clears a schedule created by this control. An empty
+`entries` array clears the schedule.
+
+## Manage one setting
+
+```typescript
+// alchemy.run.ts
+import * as ClickHouse from "@alchemy.run/clickhouse";
+import * as Alchemy from "alchemy";
+import * as Effect from "effect/Effect";
+
+export default Alchemy.Stack(
+  "ServiceTimeout",
+  { providers: ClickHouse.providers(), state: Alchemy.localState() },
+  Effect.gen(function* () {
+    return yield* ClickHouse.ServiceSetting("Timeout", {
+      organizationId: "your-organization-uuid",
+      serviceId: "your-service-uuid",
+      name: "keep_alive_timeout",
+      value: 30,
+    });
+  }),
+);
+```
+
+Only that named override is managed. Existing overrides need explicit adoption.
+Destroy restores the original override, or resets that name when none existed.
+An empty string is a value; `null` is not supported. Settings are stored in
+state, so do not use this resource for secrets. Some settings restart servers.
+
+## Ownership and recovery
+
+Keep the stack state: it contains the original and last acknowledged values.
+An external change or an interrupted write stops reconciliation rather than
+overwriting it. Investigate the live state before recovering. Remove a control
+before changing its service or setting name, and serialize concurrent writers;
+the API has no conditional write.

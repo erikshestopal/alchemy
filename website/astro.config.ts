@@ -41,6 +41,7 @@ function providersSidebarEntry() {
       { label: "Railway", link: "/railway" },
       { label: "PlanetScale", link: "/planetscale" },
       { label: "Neon", link: "/neon" },
+      { label: "ClickHouse", link: "/clickhouse" },
       { label: "Turso", link: "/turso" },
       { label: "E2B", link: "/e2b" },
       { label: "Daytona", link: "/daytona" },
@@ -1938,6 +1939,44 @@ export default defineConfig({
               ],
             },
             { ...providerResourcesEntry("Domain"), label: "Reference" },
+          ],
+        },
+        {
+          label: "ClickHouse",
+          items: [
+            { label: "Overview", link: "/clickhouse" },
+            { label: "What is ClickHouse?", link: "/clickhouse/what-is-clickhouse" },
+            { label: "Setup", link: "/clickhouse/setup" },
+            {
+              label: "Tutorial",
+              items: [{ autogenerate: { directory: "clickhouse/tutorial" } }],
+            },
+            {
+              label: "Accounts & access",
+              items: [
+                {
+                  label: "Organizations and credentials",
+                  link: "/clickhouse/accounts-access/credentials",
+                },
+              ],
+            },
+            {
+              label: "Services",
+              items: [
+                { label: "Services", link: "/clickhouse/services/service" },
+                { label: "SQL databases and connections", link: "/clickhouse/services/sql" },
+                { label: "Service controls", link: "/clickhouse/services/controls" },
+                { label: "Backup configuration", link: "/clickhouse/services/backups" },
+              ],
+            },
+            {
+              label: "Ingestion",
+              items: [
+                { label: "ClickPipes", link: "/clickhouse/ingestion/clickpipes" },
+                { label: "Private connections", link: "/clickhouse/ingestion/private-connections" },
+              ],
+            },
+            providerResourcesEntry("ClickHouse"),
           ],
         },
         {

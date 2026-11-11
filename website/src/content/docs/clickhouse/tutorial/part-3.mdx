@@ -1,0 +1,88 @@
+---
+title: "Part 3: Testing"
+description: Check authenticated reads, parameterized inserts and redeploys, then prepare the opt-in deployed-host test.
+sidebar:
+  order: 3
+---
+
+import PackageManagers from "../../../../components/PackageManagers.astro";
+
+Test the deployed URL, not just resource creation. Local workerd has exercised
+Cloud SQL, but the example's deployed-host test **has not been executed**.
+
+## Check unauthenticated access
+
+Set `API_URL` to the output Worker URL:
+
+```sh
+curl -i "$API_URL/events"
+```
+
+Expect 401 after edge propagation. This request must not execute SQL.
+
+## Read the seed
+
+```sh
+curl --fail-with-body "$API_URL/events" \
+  -H "Authorization: Bearer $CLICKHOUSE_HTTP_TOKEN"
+```
+
+After granting SQL access, expect `baseline` under the application SQL username
+and generated database name. A 502 is not a passing SQL check.
+
+## Write through the Worker
+
+```sh
+curl --fail-with-body -X POST "$API_URL/events" \
+  -H "Authorization: Bearer $CLICKHOUSE_HTTP_TOKEN" \
+  -H 'Content-Type: text/plain' --data-binary "hello with 'quotes'"
+```
+
+Expect 204, then repeat the GET to read the new row. Do not add write retries;
+inspect SQL before repeating a request whose response was lost.
+
+## Check an unchanged deploy
+
+<PackageManagers run="alchemy deploy --stage dev" />
+
+Compare database UUIDs and read events again. Applied migrations must not repeat
+the seed. Preserve state, migration files and `__alchemy_migrations__progress`.
+
+## Prepare a disposable automated-test stage
+
+The example contains `test/integ.test.ts`, built with `@alchemy.run/test/Bun`.
+It checks unauthorized reads and writes, SQL identity, an insert, an independent
+SQL read and data preservation on redeploy. It destroys the whole fixture service.
+
+Follow the [example's opt-in test setup](https://github.com/alchemy-run/alchemy/tree/main/examples/clickhouse-sql#opt-in-live-test).
+Use a separate disposable stage, supply a separately granted SQL identity and
+leave only the migration's `baseline` row. Do not reuse the manually exercised
+database above.
+
+## Enable the test gate
+
+Set these values in the test process environment, not only `.env`:
+
+```sh
+export CLICKHOUSE_SQL_EXAMPLE_TEST=1
+export CLICKHOUSE_SQL_DESTROY_DATA=true
+export ALCHEMY_TEST_STAGE=test_yourname_clickhouse_sql
+export CLICKHOUSE_SQL_EXAMPLE_TEST_SERVICE_ID=your-disposable-service-uuid
+unset ALCHEMY_TEST_DEV
+```
+
+Use the exact stage and service UUID prepared for this test. Supply the
+application credentials and HTTP token there too. Cleanup does not honor
+`NO_DESTROY`; its service-not-found check must finish successfully.
+
+## Run the example test
+
+From `examples/clickhouse-sql`:
+
+<PackageManagers run="test" />
+
+This is a command to run, not a claim that the test passes. The test does not
+retry writes or its body. If shutdown times out, inspect the service and finish
+destroy using the same state before rebuilding a fresh fixture.
+
+Next: [Stages](/clickhouse/tutorial/part-4).

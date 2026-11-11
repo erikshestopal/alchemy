@@ -11,6 +11,7 @@ Choose the database independently from the application runtime where supported. 
 | --- | --- | --- | --- |
 | AWS RDS / Aurora | Postgres or MySQL | VPC connection; Data API on supported configurations | [RDS & Aurora](/aws/data/rds) · [Aurora + Drizzle](/aws/data/drizzle-aurora) |
 | Aurora DSQL | Distributed SQL with Postgres wire compatibility | IAM-authenticated connection | [DSQL + Drizzle](/aws/data/drizzle-dsql) |
+| ClickHouse Cloud | ClickHouse | HTTPS SQL with an existing SQL username and password | [Databases, migrations and connections](/clickhouse/services/sql) |
 | Cloudflare D1 | SQLite | Native Worker binding | [D1 + Drizzle](/cloudflare/data/d1-drizzle) |
 | Durable Object storage | SQLite per named object | Instance storage | [Durable Objects](/cloudflare/compute/durable-objects#sql-migrations) |
 | Fly Managed Postgres | Postgres | Private connection from a Fly Service | [Managed Postgres](/fly/data/postgres) |
@@ -30,11 +31,19 @@ Choose the database independently from the application runtime where supported. 
 | --- | --- | --- |
 | Postgres | [Drizzle.Postgres](/sql/drizzle/postgres) · [Prisma ORM](/sql/prisma/postgres) | [SQL.Postgres](/sql/effect-sql/postgres) |
 | MySQL | [Drizzle.MySQL](/sql/drizzle/mysql) | [SQL.MySQL](/sql/effect-sql/mysql) |
+| ClickHouse | No Alchemy ORM adapter | [ClickHouse.SQL.Connect](/clickhouse/services/sql#connect-from-a-runtime) |
 | D1 | [Drizzle.D1](/sql/drizzle/d1) | [SQL.D1](/sql/effect-sql/d1) |
 | libSQL (Turso) | [Drizzle.LibSQL](/sql/drizzle/libsql) | [SQL.LibSQL](/sql/effect-sql/libsql) |
 | Durable Objects | [Drizzle.DurableObject](/sql/drizzle/migrations#durable-object-migrations) | [Instance SQL](/sql/effect-sql/migrations#durable-object-migrations) |
 
 Prisma ORM v8 requires PostgreSQL 17+. Aurora DSQL has its [own authentication and SQL constraints](/aws/data/drizzle-dsql); Postgres wire compatibility does not establish Prisma support or support for every PostgreSQL feature.
+
+ClickHouse applies committed SQL through the shared migration runner with a
+ClickHouse HTTPS executor. Its DDL is nontransactional; read the
+[progress-recovery restrictions](/clickhouse/services/sql#apply-deploy-time-migrations)
+before deploying schema changes. The runtime binding is separate from Effect
+SQL, Drizzle and Prisma. Live evidence and the unverified deployed-host path
+are described in the [ClickHouse overview](/clickhouse#verification-limits).
 
 ## Commit migration files
 

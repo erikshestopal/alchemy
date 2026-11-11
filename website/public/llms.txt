@@ -1012,6 +1012,38 @@ Observability as Stack resources — datasets, monitors, notifiers. The exporter
 - [Dashboards as code](https://alchemy.run/axiom/guides/dashboards) — Declare Axiom dashboards — charts, layout, filter bars, saved views, and deploy annotations — as alchemy resources next to the services they observe.
 - [Deploy markers & annotations](https://alchemy.run/axiom/guides/annotations) — Overlay deploys, incidents, and flag flips as vertical markers on Axiom charts — point or range annotations, scoped to one or more datasets, declared as alchemy resources.
 
+## ClickHouse Cloud
+
+Create ClickHouse Cloud services and SQL databases with migrations; connect external runtimes through SQL.Connect and ingest existing sources through ClickPipes, including PostgreSQL. Live evidence is partial: AWS Service, two SQL database cases and public S3 ingestion do not establish complete lifecycle or deployed-host coverage. Organization administration, ClickStack, query endpoints, UDFs, ClickHouse-hosted Functions, managed Postgres, BYOC and other excluded controls remain outside Alchemy's scope; the distilled SDK retains its broader API surface.
+
+- [ClickHouse Cloud](https://alchemy.run/clickhouse) — Manage ClickHouse Cloud services, SQL databases, migrations and ingestion with Alchemy.
+- [What is ClickHouse?](https://alchemy.run/clickhouse/what-is-clickhouse) — Separate ClickHouse Cloud organizations, services, SQL databases, SQL identities and application runtimes.
+- [Setup](https://alchemy.run/clickhouse/setup) — Connect Alchemy to ClickHouse Cloud with an API key and secret.
+
+## ClickHouse Cloud — Tutorial
+
+- [Part 1: Your first database](https://alchemy.run/clickhouse/tutorial/part-1) — Create a ClickHouse Cloud service and SQL database, then apply committed migrations.
+- [Part 2: Add a Worker](https://alchemy.run/clickhouse/tutorial/part-2) — Connect an authenticated Cloudflare Worker to ClickHouse using a separately granted SQL identity.
+- [Part 3: Testing](https://alchemy.run/clickhouse/tutorial/part-3) — Check authenticated reads, parameterized inserts and redeploys, then prepare the opt-in deployed-host test.
+- [Part 4: Stages](https://alchemy.run/clickhouse/tutorial/part-4) — Isolate ClickHouse services, databases, application credentials and deletion policies by deployment stage.
+- [Part 5: CI/CD](https://alchemy.run/clickhouse/tutorial/part-5) — Share state and serialize ClickHouse deployments from a trusted GitHub Actions environment.
+
+## ClickHouse Cloud — Accounts & access
+
+- [Organizations and credentials](https://alchemy.run/clickhouse/accounts-access/credentials) — Separate ClickHouse Cloud deployment permissions from SQL application access.
+
+## ClickHouse Cloud — Services
+
+- [Backup configuration](https://alchemy.run/clickhouse/services/backups) — Manage selected backup settings on an existing ClickHouse Cloud service and restore their original values.
+- [Service controls](https://alchemy.run/clickhouse/services/controls) — Schedule scaling and manage individual ClickHouse service settings.
+- [Services](https://alchemy.run/clickhouse/services/service) — Create and manage a ClickHouse Cloud service.
+- [SQL databases and connections](https://alchemy.run/clickhouse/services/sql) — Create a database inside a ClickHouse Cloud service, apply deploy-time migrations and connect a runtime with separately granted SQL credentials.
+
+## ClickHouse Cloud — Ingestion
+
+- [ClickPipes ingestion](https://alchemy.run/clickhouse/ingestion/clickpipes) — Ingest public S3 JSONEachRow objects into an existing ClickHouse Cloud table and understand lifecycle limits.
+- [Private ClickPipes connections and scaling](https://alchemy.run/clickhouse/ingestion/private-connections) — Connect ClickPipes to private sources and manage shared database ingestion capacity.
+
 ## GitHub
 
 Repos, secrets, variables, and repository event sources as Stack resources; the CI/CD guides live under Guides and each cloud's tutorial part 5.
@@ -1107,7 +1139,7 @@ Cluster-agnostic Kubernetes workloads — Deployments, Jobs and CronJobs (as ima
 
 Database comparison, Effect SQL, Drizzle, Prisma ORM v8 (Postgres-only), committed migrations, and connection lifecycle. Deployment walkthroughs live with their runtime providers.
 
-- [SQL](https://alchemy.run/sql) — Choose a database, connect with Effect SQL, Drizzle, or Prisma ORM, and deploy committed migrations.
+- [SQL](https://alchemy.run/sql) — Choose a database and its supported SQL client, then deploy committed migrations.
 - [How SQL works in Alchemy](https://alchemy.run/sql/what-is-sql) — The concepts behind SQL in Alchemy — databases and engines, clients, connections and pools, request scope, migrations and their history — and how they fit together on every cloud.
 - [Databases](https://alchemy.run/sql/databases) — Compare database engines, connection paths, and deployment guides across Alchemy's SQL providers.
 - [Postgres](https://alchemy.run/sql/effect-sql/postgres) — SQL.Postgres turns a connection string into an @effect/sql-pg client — tagged-template queries with typed errors, one pool per execution.
@@ -1201,4 +1233,4 @@ A domain-driven design framework: model commands, events, aggregates, views, pro
 
 Service-level API reference, generated from JSDoc on the source `.ts` files via `bun scripts/generate-api-reference.ts`. Each page groups resources and capabilities by service, with a heading per resource and examples extracted from source JSDoc.
 
-The service-level pages are indexed in [llms-full.txt](https://alchemy.run/llms-full.txt), which repeats this entire file plus one link per service. Warning: it is large (~253 KB) — only fetch it when you need to locate a specific resource's reference page.
+The service-level pages are indexed in [llms-full.txt](https://alchemy.run/llms-full.txt), which repeats this entire file plus one link per service. Warning: it is large (~257 KB) — only fetch it when you need to locate a specific resource's reference page.

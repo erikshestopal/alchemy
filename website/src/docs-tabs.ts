@@ -86,6 +86,9 @@ export const DOCS_TABS: DocsTab[] = [
     "/providers/planetscale",
   ]),
   hub("Neon", "neon", "Databases", "serverless Postgres · branches", ["/providers/neon"]),
+  hub("ClickHouse", "clickhouse", "Databases", "Cloud services and SQL databases", [
+    "/providers/clickhouse",
+  ]),
   hub("Turso", "turso", "Databases", "libSQL · groups · tokens", ["/providers/turso"]),
   hub("Prisma", "prisma", "Databases", "Prisma Postgres · client", ["/providers/prisma"]),
   hub("SQL", "sql", "Databases", "effect-sql · drizzle · migrations", [

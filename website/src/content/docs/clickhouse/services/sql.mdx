@@ -1,0 +1,171 @@
+---
+title: SQL databases and connections
+description: Create a database inside a ClickHouse Cloud service, apply deploy-time migrations and connect a runtime with separately granted SQL credentials.
+---
+
+A Cloud service runs ClickHouse. A SQL database inside it groups tables and
+views. Cloud API keys manage the service; SQL users and their grants control
+queries, inserts and database DDL. These credentials are not interchangeable.
+
+`SQL.Database` and the separate `SQL.Connect` binding remain in scope for
+ClickHouse SQL. Managed Postgres is [excluded by user choice](/clickhouse#out-of-scope),
+not a blocked SQL deliverable.
+
+## Create a SQL database with migrations
+
+Supply an existing service and a SQL user allowed to create databases and read
+`system.databases`. The Cloud profile discovers the service's HTTPS endpoint.
+The deploying machine must be allowed to reach it. Give the SQL user grants for
+the migrations and permission to create, read and insert into migration tables.
+
+```typescript title="alchemy.run.ts"
+// alchemy.run.ts
+import * as Alchemy from "alchemy";
+import * as ClickHouse from "@alchemy.run/clickhouse";
+import * as Config from "effect/Config";
+import * as Effect from "effect/Effect";
+
+export default Alchemy.Stack(
+  "AnalyticsSchema",
+  { providers: ClickHouse.providers(), state: Alchemy.localState() },
+  Effect.gen(function* () {
+    const password = yield* Config.Redacted("ANALYTICS_ADMIN_PASSWORD");
+    const database = yield* ClickHouse.SQL.Database("Analytics", {
+      organizationId: "your-organization-uuid",
+      serviceId: "your-service-uuid",
+      username: "database_admin",
+      password,
+      name: "analytics",
+      migrations: "./migrations",
+    });
+    return { name: database.name, uuid: database.uuid };
+  }),
+);
+```
+
+New databases receive a UUID tied to the resource's physical generation.
+Interrupted creation can recover only that exact UUID, never a matching name.
+An existing database requires explicit adoption. A missing database can be
+recreated with the acknowledged UUID only when its name is free; this cannot
+restore deleted data. External renaming or replacement with a different UUID
+blocks reconciliation. System and default databases cannot be managed.
+
+Live lifecycle coverage does not prove every DDL statement, credential setup or
+recovery path. Validate your migrations against a disposable database first.
+
+## Apply deploy-time migrations
+
+Create a migration file before running `alchemy deploy`:
+
+```sql title="migrations/0001_events.sql"
+-- migrations/0001_events.sql
+CREATE TABLE events (
+  id UInt64,
+  value String
+) ENGINE = MergeTree ORDER BY id;
+```
+
+The shared `@alchemy.run/sql/Migrations` runner applies pending files over HTTPS
+and records their hashes in `__alchemy_migrations`. Add files in order for later
+changes; an unchanged deployment has no migration work. Applied files cannot be
+edited, removed or renamed. Omit `migrations` to manage only the database.
+
+ClickHouse DDL is nontransactional. Before each statement, Alchemy records
+`intent` in `__alchemy_migrations__progress`; after acknowledgment, it records
+`complete`. Completed statements are skipped on retry. A failed statement or
+lost response can leave an intent without completion, which Alchemy refuses to
+replay. Inspect the database and repair progress before retrying. Earlier
+statements are not rolled back.
+
+Alchemy forces synchronous insertion for migration statements, progress and
+history, overriding asynchronous user defaults. Before running a file, it rejects
+settings that could disable durable acknowledgment, including quoted or opaque
+values, resets and profile switches. Unrelated query and table settings remain
+supported; explicit `async_insert = 0` and `wait_for_async_insert = 1` are allowed.
+
+Serialize deploys and other migration writers for each database; there is no
+lock or conditional write. Session state and transactions are unsupported;
+`USE` and transaction commands are rejected. Automatic foreign-history
+conversion is unsupported. A custom history table can be selected on the first
+deploy with `migrations: { dir: "./migrations", table: "schema_history" }`.
+Keep that table name afterward: moving history and its progress log is not atomic.
+Protect the stack state, migration files and both migration tables; recovery
+depends on their recorded identity, hashes and progress.
+
+## Keep or delete the data
+
+Destroy retains the SQL database by default and removes it from stack
+management. To permit deletion of the database and all its tables, declare
+`dropOnDelete: true` and deploy that change before destroying.
+
+Changing the service, organization or explicit database name replaces the
+database. An omitted name preserves the acknowledged name. Replacement does
+not copy tables or data. Other DDL writers must serialize with deployments:
+ClickHouse drops by name and offers no UUID compare-and-swap.
+
+## Connect from a runtime
+
+Give the application a separate SQL user with only its required grants. The
+connection does not create users, change grants or use management keys.
+Store its password through a [secret provider](/environments/secrets), such as
+Doppler, Infisical or per-stage secrets.
+
+```typescript title="src/health.ts"
+// src/health.ts
+import * as ClickHouse from "@alchemy.run/clickhouse";
+import * as Cloudflare from "@alchemy.run/cloudflare";
+import * as Config from "effect/Config";
+import * as Effect from "effect/Effect";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
+
+const Analytics = ClickHouse.Service.lookup({
+  organizationId: "your-organization-uuid",
+  serviceId: "your-service-uuid",
+});
+
+export default class Health extends Cloudflare.Worker<Health>()(
+  "Health",
+  { main: import.meta.url },
+  Effect.gen(function* () {
+    const password = yield* Config.Redacted("ANALYTICS_APP_PASSWORD");
+    const sql = yield* ClickHouse.SQL.Connect("AnalyticsReader", Analytics, {
+      username: "app_reader",
+      password,
+      database: "analytics",
+    });
+    return {
+      fetch: Effect.gen(function* () {
+        const rows = yield* sql.query({ sql: "SELECT 1 AS healthy" });
+        return yield* HttpServerResponse.json(rows);
+      }).pipe(Effect.orDie),
+    };
+  }).pipe(Effect.provide(ClickHouse.SQL.ConnectHttp)),
+) {}
+```
+
+Include the Worker in a stack with the ClickHouse and Cloudflare provider
+layers. Each connection name must be unique within its host. Passwords are
+injected as secrets, but all code running in that host can access them.
+
+## Query and insert safely
+
+Use typed parameters instead of interpolating user input into SQL:
+
+```typescript
+// Inside the host's request handler, with the bound sql client.
+const userSuppliedValue = "hello with 'quotes'";
+const rows = yield* sql.query({
+  sql: "SELECT value FROM events WHERE value = {value:String}",
+  parameters: { value: userSuppliedValue },
+});
+```
+
+`query`, `command` and `insert` use the supplied user's grants. The default
+database and method names are not permission boundaries. Queries can name other
+databases or change data whenever that user has permission. The transport does
+not follow redirects or retry uncertain writes; inspect the result before
+retrying an insert whose response was lost.
+
+A local Worker using the real Cloud SQL user passed allowed reads and inserts,
+denied DDL and cross-database reads, and rejected a read-only-setting bypass.
+This verifies local workerd through the RPC sidecar, not a deployed Cloudflare Worker.

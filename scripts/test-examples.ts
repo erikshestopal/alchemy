@@ -37,6 +37,9 @@ class ExitWith extends Data.TaggedError("ExitWith")<{ readonly code: number }> {
 }
 
 const examples = [
+  "./examples/clickhouse-service",
+  // Requires a separately granted SQL identity and an explicitly disposable stage.
+  // "./examples/clickhouse-sql",
   "./examples/cloudflare-dev",
   "./examples/cloudflare-worker",
   "./examples/cloudflare-worker-async",

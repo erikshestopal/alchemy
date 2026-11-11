@@ -1986,6 +1986,53 @@ importers:
         specifier: workspace:*
         version: link:../../packages/alchemy-test
 
+  examples/clickhouse-service:
+    dependencies:
+      '@alchemy.run/clickhouse':
+        specifier: workspace:*
+        version: link:../../packages/clickhouse
+      '@distilled.cloud/clickhouse':
+        specifier: workspace:*
+        version: link:../../submodules/distilled/packages/clickhouse
+      alchemy:
+        specifier: workspace:*
+        version: link:../../packages/alchemy
+      effect:
+        specifier: 4.1.0
+        version: 4.1.0
+    devDependencies:
+      '@alchemy.run/test':
+        specifier: workspace:*
+        version: link:../../packages/alchemy-test
+      '@types/bun':
+        specifier: 'catalog:'
+        version: 1.4.3
+
+  examples/clickhouse-sql:
+    dependencies:
+      '@alchemy.run/clickhouse':
+        specifier: workspace:*
+        version: link:../../packages/clickhouse
+      '@alchemy.run/cloudflare':
+        specifier: workspace:*
+        version: link:../../packages/cloudflare
+      alchemy:
+        specifier: workspace:*
+        version: link:../../packages/alchemy
+      effect:
+        specifier: 4.1.0
+        version: 4.1.0
+    devDependencies:
+      '@alchemy.run/test':
+        specifier: workspace:*
+        version: link:../../packages/alchemy-test
+      '@distilled.cloud/clickhouse':
+        specifier: workspace:*
+        version: link:../../submodules/distilled/packages/clickhouse
+      '@types/bun':
+        specifier: 'catalog:'
+        version: 1.4.3
+
   examples/cloudflare-agents:
     dependencies:
       '@modelcontextprotocol/sdk':

@@ -1,0 +1,77 @@
+---
+title: "Part 4: Stages"
+description: Isolate ClickHouse services, databases, application credentials and deletion policies by deployment stage.
+sidebar:
+  order: 4
+---
+
+import PackageManagers from "../../../../components/PackageManagers.astro";
+
+A stage has separate resource identities and state. A different stage does not
+copy SQL data, users or grants from another service.
+
+## Choose stage-specific settings
+
+Select the organization, network CIDRs and application secrets for the target
+stage before deploying. Use [per-stage secrets](/environments/secrets) or a
+[secret provider](/environments/secret-providers), not committed passwords.
+
+The example uses generated physical names. Keep those defaults rather than
+pinning every stage to the same service UUID or database name.
+
+## Deploy a preview
+
+<PackageManagers run="alchemy deploy --stage preview-yourname" />
+
+This creates another billable service and database. Grant the preview
+application identity access on that new service before making SQL requests.
+
+## Keep production separate
+
+<PackageManagers run="alchemy deploy --stage prod" />
+
+Run only after selecting production credentials and network access. There is
+no automatic copy of preview tables or data. Review replacement plans carefully:
+changing the parent service identity or database name does not migrate data.
+
+## Retain data on destroy
+
+Leave `CLICKHOUSE_SQL_DESTROY_DATA=false`, the default:
+
+<PackageManagers run="alchemy destroy --stage preview-yourname" />
+
+Destroy removes the Worker and forgets the retained service and SQL database.
+**Retained compute remains billable.** Back up state securely first; it holds
+the initial password. Redeclaring the names does not reclaim retained resources.
+
+## Enable destructive preview cleanup instead
+
+For a disposable preview whose data you intend to delete:
+
+```sh
+export CLICKHOUSE_SQL_DESTROY_DATA=true
+```
+
+This disables parent-service retention and enables database `dropOnDelete`.
+Never enable it for a service containing data you need to keep.
+
+## Save the deletion policy
+
+<PackageManagers run="alchemy deploy --stage preview-yourname" />
+
+Use an existing disposable preview that is still tracked. Deploy the policy
+change before destroying; setting an environment variable alone does not
+update the acknowledged policy. Do not recreate a preview already forgotten
+by the retention example above.
+
+## Delete the disposable preview
+
+<PackageManagers run="alchemy destroy --stage preview-yourname" />
+
+This deletes the whole service and its data. A database retention setting
+cannot protect data from parent-service deletion. Keep state until deletion
+succeeds; if shutdown exceeds the bounded wait, inspect and retry only destroy.
+Serialize deployment, destruction and external DDL writers because DROP has no
+UUID compare-and-swap.
+
+Next: [CI/CD](/clickhouse/tutorial/part-5).

@@ -1,0 +1,110 @@
+---
+title: "Part 5: CI/CD"
+description: Share state and serialize ClickHouse deployments from a trusted GitHub Actions environment.
+sidebar:
+  order: 5
+---
+
+import PackageManagers from "../../../../components/PackageManagers.astro";
+
+CI needs shared state, SQL network access and the same stage-specific settings
+as a local deploy. The ClickHouse provider currently accepts a management key
+and secret; it does not implement an OIDC exchange.
+
+## Switch to shared state
+
+For a new CI-managed stack, use the Cloudflare state store already available
+from the Worker's provider:
+
+```diff lang="typescript"
+// alchemy.run.ts
+-    state: Alchemy.localState(),
++    state: Cloudflare.state(),
+```
+
+Do not point an already-deployed stack at an empty store. Back up and migrate
+its state first using the [state-store guidance](/state-store); losing state
+also loses the service's one-time SQL password. ClickHouse supplies no state store.
+
+## Configure deployment secrets
+
+In a protected GitHub environment named `clickhouse-production`, store
+`CLICKHOUSE_CLOUD_API_KEY`, `CLICKHOUSE_CLOUD_API_SECRET`,
+`CLOUDFLARE_API_TOKEN`, `CLICKHOUSE_APP_PASSWORD` and `CLICKHOUSE_HTTP_TOKEN`.
+Use the least management permissions needed by the stack. Rotate long-lived
+keys and never expose them to untrusted pull requests.
+
+For an existing database, CI must use the state containing its initial SQL
+credential. Neither `SQL.Connect` nor CI creates the application user or grants.
+
+## Configure the deployment destination
+
+Set environment variables `CLOUDFLARE_ACCOUNT_ID`, `CLICKHOUSE_ORGANIZATION_ID`,
+`CLICKHOUSE_APP_USERNAME`, `CLICKHOUSE_DEPLOY_CIDR` and
+`CLICKHOUSE_WORKER_CIDR`. GitHub variables hold identifiers and CIDRs, not passwords.
+
+The runner must have stable egress allowed by the service. Do not copy a local
+machine's CIDR onto a hosted runner, or open production SQL to the world to
+make CI work. The workflow below assumes a trusted self-hosted runner with that access.
+
+## Add the deployment workflow
+
+```yaml
+# .github/workflows/deploy-clickhouse.yml
+name: Deploy ClickHouse application
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: clickhouse-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    environment: clickhouse-production
+    permissions:
+      contents: read
+    env:
+      CI: "true"
+      CLICKHOUSE_CLOUD_API_KEY: ${{ secrets.CLICKHOUSE_CLOUD_API_KEY }}
+      CLICKHOUSE_CLOUD_API_SECRET: ${{ secrets.CLICKHOUSE_CLOUD_API_SECRET }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      CLICKHOUSE_ORGANIZATION_ID: ${{ vars.CLICKHOUSE_ORGANIZATION_ID }}
+      CLICKHOUSE_DEPLOY_CIDR: ${{ vars.CLICKHOUSE_DEPLOY_CIDR }}
+      CLICKHOUSE_WORKER_CIDR: ${{ vars.CLICKHOUSE_WORKER_CIDR }}
+      CLICKHOUSE_APP_USERNAME: ${{ vars.CLICKHOUSE_APP_USERNAME }}
+      CLICKHOUSE_APP_PASSWORD: ${{ secrets.CLICKHOUSE_APP_PASSWORD }}
+      CLICKHOUSE_HTTP_TOKEN: ${{ secrets.CLICKHOUSE_HTTP_TOKEN }}
+      CLICKHOUSE_SQL_DESTROY_DATA: "false"
+    defaults:
+      run:
+        working-directory: examples/clickhouse-sql
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      - run: bun alchemy deploy --stage prod --yes
+```
+
+This repository-layout example deploys only when dispatched. Validate it with
+your shared state and credentials before relying on it; it has not been run
+as part of the current live evidence. Keep external SQL writers serialized too:
+Actions concurrency does not lock out a local deployment.
+
+## Deploy a reviewed revision
+
+Commit and review migration files before dispatching. Failed or uncertain SQL
+statements need inspection of `__alchemy_migrations__progress`, not workflow retries.
+Never replay a captured plan from a failed apply.
+
+For a trusted local deployment using the same shared state:
+
+<PackageManagers run="alchemy deploy --stage prod" />
+
+Continue with [SQL databases and connections](/clickhouse/services/sql),
+[ClickPipes ingestion](/clickhouse/ingestion/clickpipes),
+[service controls](/clickhouse/services/controls) or
+[backup configuration](/clickhouse/services/backups).

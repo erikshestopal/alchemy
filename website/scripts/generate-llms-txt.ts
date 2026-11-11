@@ -821,6 +821,28 @@ const SECTIONS: Section[] = [
     },
   },
   {
+    heading: "ClickHouse Cloud",
+    intro:
+      "Create ClickHouse Cloud services and SQL databases with migrations; connect external runtimes through SQL.Connect and ingest existing sources through ClickPipes, including PostgreSQL. Live evidence is partial: AWS Service, two SQL database cases and public S3 ingestion do not establish complete lifecycle or deployed-host coverage. Organization administration, ClickStack, query endpoints, UDFs, ClickHouse-hosted Functions, managed Postgres, BYOC and other excluded controls remain outside Alchemy's scope; the distilled SDK retains its broader API surface.",
+    pages: { slugs: ["clickhouse/index", "clickhouse/what-is-clickhouse", "clickhouse/setup"] },
+  },
+  {
+    heading: "ClickHouse Cloud — Tutorial",
+    pages: { directory: "clickhouse/tutorial" },
+  },
+  {
+    heading: "ClickHouse Cloud — Accounts & access",
+    pages: { directory: "clickhouse/accounts-access" },
+  },
+  {
+    heading: "ClickHouse Cloud — Services",
+    pages: { directory: "clickhouse/services" },
+  },
+  {
+    heading: "ClickHouse Cloud — Ingestion",
+    pages: { directory: "clickhouse/ingestion" },
+  },
+  {
     heading: "GitHub",
     intro:
       "Repos, secrets, variables, and repository event sources as Stack resources; the CI/CD guides live under Guides and each cloud's tutorial part 5.",

@@ -1,0 +1,56 @@
+---
+title: Backup configuration
+description: Manage selected backup settings on an existing ClickHouse Cloud service and restore their original values.
+---
+
+ClickHouse Cloud schedules backups for each service. `BackupConfiguration`
+manages selected schedule and retention fields, not backup data or external
+storage buckets. Retention is measured in hours.
+
+:::caution[Verification limits]
+Backup retention adoption, update, null reset and restoration passed against a
+disposable Cloud service. This does not establish coverage for every schedule
+field. A missing parent blocks destroy rather than treating its 404 as
+successful restoration.
+:::
+
+## Manage backup settings
+
+Adopt an existing service's backup settings to change only the fields you
+declare. Omitting a field preserves it; `null` asks ClickHouse to reset it.
+Retention must be a whole number of days between 24 and 1,080 hours. A backup
+start time is in UTC and resets the interval to 24 hours, so this control
+requires the existing interval to be 24 hours before changing the start time.
+
+```typescript
+// alchemy.run.ts
+import * as ClickHouse from "@alchemy.run/clickhouse";
+import * as Alchemy from "alchemy";
+import * as Effect from "effect/Effect";
+
+export default Alchemy.Stack(
+  "BackupRetention",
+  { providers: ClickHouse.providers(), state: Alchemy.localState() },
+  Effect.gen(function* () {
+    return yield* ClickHouse.BackupConfiguration("Backups", {
+      organizationId: "your-organization-uuid",
+      serviceId: "your-service-uuid",
+      backupRetentionPeriodInHours: 168,
+    }).pipe(Alchemy.AdoptPolicy.adopt(true));
+  }),
+);
+```
+
+## Adoption and restoration
+
+Explicit adoption saves the original values of declared fields before the
+first change. Removing the control restores those values only if the current
+values still match what the control last wrote. Restore and remove the control
+before changing its service or the set of managed fields.
+
+Keep the stack state safe: it holds the original values. ClickHouse does not
+provide conditional writes, so use one writer for each setting. If a response
+is lost after a write, inspect the service before retrying; Alchemy cannot
+distinguish that write from an external change.
+
+Snapshot and external backup bucket controls are [out of scope](/clickhouse#out-of-scope).

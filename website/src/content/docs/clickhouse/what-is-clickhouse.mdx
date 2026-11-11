@@ -1,0 +1,115 @@
+---
+title: What is ClickHouse?
+description: Separate ClickHouse Cloud organizations, services, SQL databases, SQL identities and application runtimes.
+---
+
+import DAG from "../../../components/DAG.astro";
+
+ClickHouse is a column-oriented SQL database for analytical queries. ClickHouse
+Cloud runs it as a managed **service** in a cloud provider and region you choose.
+A service exposes SQL endpoints; databases inside it hold tables and views.
+
+Take an event journal: a Cloudflare Worker inserts events into a ClickHouse
+table and reads them back. The Worker runs outside ClickHouse. Its SQL user
+controls access to the data, separately from the Cloud API key used to deploy.
+
+<DAG
+  nodes={[
+    { id: "api", label: "Api", type: "Cloudflare Worker", col: 0, row: 0 },
+    { id: "events", label: "events", type: "application table", col: 0, row: 2 },
+    { id: "history", label: "__alchemy_migrations", type: "migration history", col: 0, row: 3 },
+  ]}
+  groups={[
+    { id: "organization", label: "ClickHouse Cloud organization", nodes: [] },
+    { id: "service", label: "Service · AWS us-east-1", parent: "organization", nodes: [] },
+    { id: "database", label: "SQL database", parent: "service", nodes: ["events", "history"] },
+  ]}
+  edges={[
+    { from: "api", to: "database", label: "HTTPS SQL" },
+  ]}
+  caption="The Worker runs on Cloudflare. The SQL database and its tables belong to a ClickHouse service, not to the Worker."
+/>
+
+## Organizations and management access
+
+An **organization** holds your Cloud services and their management permissions.
+Every service declaration names its organization UUID. A Cloud API key and
+secret authenticate management requests; they are not SQL credentials.
+
+See [Setup](/clickhouse/setup) and [Organizations and credentials](/clickhouse/accounts-access/credentials).
+
+## Services and regions
+
+A service supplies the compute and endpoints that execute SQL. Replica sizing,
+idle scaling and network access are service settings. In Alchemy,
+`ClickHouse.Service` creates or manages that service; it does not define an
+application's tables.
+
+See [Services](/clickhouse/services/service).
+
+## SQL databases and tables
+
+A **SQL database** groups tables inside a service. `ClickHouse.SQL.Database`
+manages one database and can apply its schema migrations during deployment:
+
+```typescript
+// Inside the Stack's Effect.gen; credentials belong to a SQL administrator.
+const password = yield* Config.Redacted("ANALYTICS_ADMIN_PASSWORD");
+const analytics = yield* ClickHouse.SQL.Database("Analytics", {
+  organizationId: service.organizationId,
+  serviceId: service.serviceId,
+  username: "database_admin",
+  password,
+  migrations: "./migrations",
+});
+```
+
+Migration files create or change tables; their hashes are recorded in
+`__alchemy_migrations`. Add new files instead of rewriting applied ones.
+ClickHouse DDL is nontransactional: earlier statements remain applied when a
+later statement fails.
+
+See [SQL databases and connections](/clickhouse/services/sql).
+
+## SQL identities and application runtimes
+
+A **SQL user** and its grants decide which queries and writes are allowed.
+`ClickHouse.SQL.Connect` gives a Worker or another Platform host an HTTPS SQL
+client using an explicitly supplied user and password. It creates no users or
+grants and never selects the service's initial password automatically.
+
+The default database is only a query default, not a permission boundary.
+Give applications separately granted identities rather than deployment SQL
+credentials. Store passwords with a [secret provider](/environments/secrets).
+
+See [Connect from a runtime](/clickhouse/services/sql#connect-from-a-runtime).
+
+## State and deletion
+
+Alchemy records the service UUID, database UUID and migration history hashes in
+its [state store](/state-store). The initial service password is redacted there;
+protect the state because ClickHouse does not reveal that password again.
+
+`SQL.Database` retains its database on destroy unless `dropOnDelete` was enabled.
+That cannot preserve data if you also delete the parent service. The tutorial
+therefore retains both by default and requires an explicit opt-in to delete data.
+Retained compute remains billable.
+
+## How @alchemy.run/clickhouse models these concepts
+
+Resources manage Cloud services and SQL databases. Database migrations manage
+schema changes. The `SQL.ConnectHttp` binding implementation connects another
+provider's runtime to ClickHouse using SQL credentials, without giving it Cloud
+management credentials.
+
+User-defined functions (UDFs), ClickHouse-hosted Functions, managed Postgres and
+bring your own cloud (BYOC) are excluded by user choice, not pending deliverables.
+The distilled SDK retains their API operations; SDK coverage does not imply
+Alchemy support. ClickPipes connects existing sources, including PostgreSQL;
+it does not create those source databases. Cloud `Service`, `SQL.Database` and
+`SQL.Connect` remain in scope, including connections from other providers'
+Workers and Functions.
+
+See [provider scope and live evidence](/clickhouse).
+
+Next: [Build a SQL event journal](/clickhouse/tutorial/part-1).

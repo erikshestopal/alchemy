@@ -1,9 +1,9 @@
 ---
 title: SQL
-description: Choose a database, connect with Effect SQL, Drizzle, or Prisma ORM, and deploy committed migrations.
+description: Choose a database and its supported SQL client, then deploy committed migrations.
 ---
 
-`@alchemy.run/sql` is how Alchemy apps use SQL databases, on every cloud. You declare the database, its migrations run on deploy, and your code queries it with Effect SQL, Drizzle or Prisma ORM over a connection that lasts one request.
+Alchemy database resources apply committed migrations on deploy through `@alchemy.run/sql`. Choose a runtime client for your database: Effect SQL, Drizzle and Prisma ORM cover supported relational engines; ClickHouse has its own HTTPS SQL binding.
 
 **New here?** [How SQL works in Alchemy](/sql/what-is-sql) walks through databases, clients, connections, pools and migrations, once each.
 
@@ -25,8 +25,10 @@ See [Databases](/sql/databases) to compare engines and connection paths, with li
 | Effect SQL | [Postgres](/sql/effect-sql/postgres) · [MySQL](/sql/effect-sql/mysql) · [D1](/sql/effect-sql/d1) · [libSQL](/sql/effect-sql/libsql) · [Durable Objects](/sql/effect-sql/migrations#durable-object-migrations) |
 | Drizzle | [Postgres](/sql/drizzle/postgres) · [MySQL](/sql/drizzle/mysql) · [D1](/sql/drizzle/d1) · [libSQL](/sql/drizzle/libsql) · [Durable Objects](/sql/drizzle/migrations#durable-object-migrations) |
 | Prisma ORM v8 | [Contracts](/sql/prisma/contracts) · [Postgres](/sql/prisma/postgres) · [Migrations](/sql/prisma/migrations) |
+| ClickHouse HTTPS SQL | [SQL.Connect](/clickhouse/services/sql#connect-from-a-runtime) using a separately granted SQL identity |
 
 Prisma ORM v8 requires PostgreSQL 17+ and is separate from the [Prisma hosting provider](/prisma).
+ClickHouse's binding uses distilled's HTTPS SQL client, not an Effect SQL, Drizzle or Prisma adapter.
 
 <span id="what-are-you-building" />
 
@@ -46,6 +48,7 @@ Prisma ORM v8 requires PostgreSQL 17+ and is separate from the [Prisma hosting p
 | Railway Service + Postgres + Drizzle | [Railway](/railway/data/drizzle-postgres) |
 | Railway Service + MySQL + Drizzle | [Railway](/railway/data/drizzle-mysql) |
 | Workers + Neon + Prisma ORM | [Cloudflare](/cloudflare/data/prisma) |
+| External Worker + ClickHouse SQL | [ClickHouse tutorial](/clickhouse/tutorial/part-1), with deployed-host verification still pending |
 
 See [runnable examples](https://github.com/alchemy-run/alchemy/blob/main/examples/README.md) for complete projects.
 
@@ -54,6 +57,7 @@ See [runnable examples](https://github.com/alchemy-run/alchemy/blob/main/example
 ## Already have a database?
 
 ```typescript
+// src/query.ts
 import * as SQL from "@alchemy.run/sql/Postgres";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";

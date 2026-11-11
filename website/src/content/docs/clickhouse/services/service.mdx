@@ -1,0 +1,108 @@
+---
+title: Services
+description: Create and manage a ClickHouse Cloud service.
+---
+
+A service runs ClickHouse in a cloud region. A new service can start a new
+warehouse, join an existing warehouse, or restore a backup. Services in one
+warehouse share storage and a release channel.
+
+Cloud `Service` remains in scope. BYOC service configuration is excluded by
+user choice, alongside BYOC infrastructure and support access. See
+[provider scope](/clickhouse#out-of-scope).
+
+:::caution[Shutdown can require another destroy]
+Configuration lifecycles passed on AWS, GCP and Azure, including deletion.
+Other configurations may take longer to stop. Keep state and retry destroy
+after a shutdown timeout; an unfinished shutdown is not a completed deletion.
+:::
+
+## Create a service
+
+```typescript
+// alchemy.run.ts
+import * as ClickHouse from "@alchemy.run/clickhouse";
+import * as Alchemy from "alchemy";
+import * as RemovalPolicy from "alchemy/RemovalPolicy";
+import * as Effect from "effect/Effect";
+
+export default Alchemy.Stack(
+  "Analytics",
+  { providers: ClickHouse.providers(), state: Alchemy.localState() },
+  Effect.gen(function* () {
+    const db = yield* ClickHouse.Service("Database", {
+      organizationId: "your-organization-uuid",
+      provider: "aws",
+      region: "us-east-1",
+      minReplicaMemoryGb: 8,
+      maxReplicaMemoryGb: 8,
+      numReplicas: 1,
+      ipAccessList: [{ source: "192.0.2.0/24", description: "Office" }],
+    }).pipe(RemovalPolicy.retain());
+    return { serviceId: db.serviceId };
+  }),
+);
+```
+
+ClickHouse reveals the generated SQL password only at creation. Alchemy keeps
+it as `Redacted` in state; protect the state store. A password lost before the
+state commit cannot be recovered, and Alchemy never resets it during recovery.
+Replace the example CIDR before connecting. This example retains the service
+on destroy; retained compute remains billable.
+
+## Sizing and idle policy
+
+Use per-replica memory and `numReplicas` for vertical scaling. Horizontal
+scaling uses equal memory bounds and a `minReplicas`/`maxReplicas` range; it
+requires organization entitlement. `idleScaling` defaults to true when
+ClickHouse creates a service. Gen 2 requires AWS, fixed size and idle scaling
+disabled. Custom profiles have additional plan and sizing constraints.
+The old total-memory and tier fields are for legacy services; do not combine
+total memory with replica sizing.
+
+## Access and shared endpoints
+
+An omitted mutable field preserves the observed value. An explicit empty IP
+list, tag set, or private-endpoint association list clears that set. A tag may
+have no value. Five reserved hashed tags identify the stack, stage, fully
+qualified resource name (FQN), instance generation and creation intent.
+They leave room for 45 user tags within ClickHouse's 50-tag limit. Do not edit the
+reserved tags: interrupted creation uses them to recover the correct generation.
+Private endpoint IDs must already be available to the service; this resource
+associates them but does not create or delete the shared network registrations.
+Private endpoint configuration is not part of the service output; use the
+ClickHouse API separately when it is needed. The organization core-dump policy
+takes precedence over the service setting.
+
+## Ownership and recovery
+
+Adopt an existing service by exact UUID with `Alchemy.AdoptPolicy.adopt(true)`. A name is
+not proof of ownership. Destroying an adopted service deletes it, so check its
+data and dependencies before adoption. Explicit create-only settings must match
+the service details ClickHouse returns. Restore origin cannot be verified, so
+omit `backupId` and `backupEncryptionConfig` when adopting. Alchemy records
+your declared creation intent after adoption; it does not verify the service's
+original restore source. Changing provider, region, warehouse,
+backup origin, create-only security settings or hardware
+generation replaces the service and may destroy data. Renaming retains its ID.
+Replacement uses declared settings and Cloud defaults; it does not copy omitted
+mutable settings from the old service. You need not declare every option, but
+review the replacement's defaults. A matching name in the same organization
+blocks creation without deleting the old service. Back up data first.
+
+## Planning and interrupted creation
+
+Service diff compares declared props and cached identity, not live drift on
+every plan. Use explicit refresh or drift observation to inspect cloud changes.
+
+A fresh deploy can recover an interrupted create by its five reserved tags,
+never by a matching display name. The recovered service's one-time password
+remains unavailable if it was lost; supply an existing SQL credential rather
+than expecting recovery to reset it.
+
+Discard any captured plan after a failed apply; replaying it bypasses the new
+plan's safety checks. Readiness polls every ten seconds for up to five minutes.
+A timeout reports failure, not readiness; a fresh deploy resumes that generation.
+Shutdown and deletion have separate bounded checks. Pending deletion reports
+`DeleteInProgress` and remains tracked in state. Retry destroy to finish;
+an already-stopping service is not stopped again.

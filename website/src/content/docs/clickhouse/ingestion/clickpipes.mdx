@@ -1,0 +1,137 @@
+---
+title: ClickPipes ingestion
+description: Ingest public S3 JSONEachRow objects into an existing ClickHouse Cloud table and understand lifecycle limits.
+---
+
+A ClickPipe ingests data from a source into tables in one ClickHouse Cloud
+service. Its field mappings connect source fields to destination columns;
+they do not migrate the destination table's schema. PostgreSQL remains an
+ingestion source: ClickPipes connects an existing PostgreSQL database, not a
+new database provisioned by Alchemy.
+
+Public S3 JSONEachRow ingestion, renaming with the same pipe UUID, an unchanged
+redeploy and deletion passed against a disposable Cloud service. Deletion
+preserved the existing destination table's UUID, DDL and rows.
+
+## Ingest public S3 objects
+
+Use an existing service and destination table. Create the table through SQL
+before deploying the pipe:
+
+```sql
+CREATE TABLE default.events (message String)
+ENGINE = MergeTree
+ORDER BY tuple();
+```
+
+Set `CLICKHOUSE_OBJECT_URL` to an unsigned, publicly readable HTTPS S3 object
+with JSONEachRow records such as:
+
+```json
+{"a":"hello"}
+```
+
+Omit `authentication` for public object storage. `PUBLIC` is not a valid
+authentication value.
+
+```typescript title="alchemy.run.ts"
+// alchemy.run.ts
+import * as Alchemy from "alchemy";
+import * as ClickHouse from "@alchemy.run/clickhouse";
+import * as Config from "effect/Config";
+import * as Effect from "effect/Effect";
+
+export default Alchemy.Stack(
+  "Ingestion",
+  { providers: ClickHouse.providers(), state: Alchemy.localState() },
+  Effect.gen(function* () {
+    const url = yield* Config.String("CLICKHOUSE_OBJECT_URL");
+    const pipe = yield* ClickHouse.ClickPipes.Pipe("Events", {
+      organizationId: "your-organization-uuid",
+      serviceId: "your-service-uuid",
+      source: {
+        kind: "objectStorage",
+        config: {
+          type: "s3",
+          format: "JSONEachRow",
+          url,
+          isContinuous: false,
+        },
+      },
+      destination: {
+        database: "default",
+        table: "events",
+        managedTable: false,
+        columns: [{ name: "message", type: "String" }],
+      },
+      fieldMappings: [{ sourceField: "a", destinationField: "message" }],
+      state: "running",
+    });
+    return { clickPipeId: pipe.clickPipeId, state: pipe.state };
+  }),
+);
+```
+
+`isContinuous: false` selects a batch load. The live check waited for
+`Completed` and verified the ingested rows through SQL. A successful deploy
+does not itself mean ingestion has completed.
+
+## Updates and deletion
+
+Changing `name` keeps the pipe UUID. An unchanged redeploy is a no-op; declaring
+`state: "running"` does not restart a completed batch.
+
+Changing immutable source settings, such as the S3 URL or format, or the
+destination database or table replaces the pipe. Replacement deletes the old
+pipe before creating its successor. It is not a live-verified retention path
+for every source type.
+
+`destination.columns` and `fieldMappings` configure the pipe, not table DDL.
+Omitting `fieldMappings` preserves them. Omit `scaling`, `settings` or `state`
+to leave that setting unmanaged.
+
+Destroy calls the ClickPipe deletion API directly; it does not first stop the
+pipe or issue table DDL. With `managedTable: false`, the live deletion check
+preserved the destination UUID, `CREATE TABLE` definition and all rows,
+including pre-existing and ingested data. Retention for ClickHouse-managed
+destination tables is not live-verified.
+
+## Database sources and adoption
+
+Kafka, Kinesis, Pub/Sub, PostgreSQL, MySQL, MongoDB, BigQuery and other
+object-storage configurations are implemented but not live-proven by the
+current public S3 evidence. Authenticated S3 and private-source ingestion are
+not live-proven either.
+
+Deletion does not change caller-managed source grants, MySQL binlog retention,
+MongoDB configuration or BigQuery datasets. ClickHouse cleans up PostgreSQL's
+pipe-managed replication slots and publications; do not share those objects
+with another consumer. The deletion API has no source-retention option.
+Give BigQuery a dedicated staging bucket prefix and manage retained staging
+objects separately. Source cleanup is not live-verified here.
+
+PostgreSQL, MySQL and MongoDB mapping additions or removals require the API's
+current mapping set. Changing an existing mapping fails with `PipeSafetyError`;
+BigQuery source changes require replacement. Retained destination data can
+require a new table for replacement, because snapshot destinations must be empty.
+Initial snapshot readiness does not mean loading is complete.
+
+Adoption requires an exact `clickPipeId` and `Alchemy.AdoptPolicy.adopt(true)`.
+Alchemy verifies visible immutable source and destination settings. Secrets
+cannot be read back; supplied mutable credentials are applied during adoption.
+A matching name is never ownership evidence.
+
+## Interrupted operations
+
+A lost create response requires inspection; writes are not automatically
+retried. Identify the created pipe's UUID and use explicit adoption rather
+than matching by name. Back up state before repairing an interrupted record.
+A missing managed pipe without an explicit `clickPipeId` can be recreated from
+its declaration; this can start a new load, not restore the old ingestion position.
+
+Inspect a failed source update before retrying or rolling back settings the
+API does not return, such as credentials. The update may already have succeeded.
+Account-wide nuke skips pipes because it cannot establish ownership.
+
+See [Private connections and CDC scaling](/clickhouse/ingestion/private-connections)
+for connection controls and service-wide database ingestion capacity.

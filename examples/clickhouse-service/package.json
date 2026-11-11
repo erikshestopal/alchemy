@@ -1,0 +1,22 @@
+{
+  "name": "clickhouse-service",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "alchemy deploy",
+    "destroy": "alchemy destroy",
+    "query": "bun query.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@alchemy.run/clickhouse": "workspace:*",
+    "@distilled.cloud/clickhouse": "workspace:*",
+    "alchemy": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@alchemy.run/test": "workspace:*",
+    "@types/bun": "catalog:"
+  }
+}
