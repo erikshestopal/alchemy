@@ -27,6 +27,7 @@
   "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
+    "./ClickPipes": "./src/ClickPipes/index.ts",
     "./SQL": "./src/SQL/index.ts",
     "./*": "./src/*.ts",
     "./package.json": "./package.json"
@@ -38,6 +39,12 @@
         "bun": "./src/index.ts",
         "worker": "./src/index.ts",
         "default": "./lib/index.js"
+      },
+      "./ClickPipes": {
+        "types": "./lib/ClickPipes/index.d.ts",
+        "bun": "./src/ClickPipes/index.ts",
+        "worker": "./src/ClickPipes/index.ts",
+        "default": "./lib/ClickPipes/index.js"
       },
       "./SQL": {
         "types": "./lib/SQL/index.d.ts",
