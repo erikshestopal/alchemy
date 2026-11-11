@@ -9,7 +9,7 @@
 # `git submodule update --init --checkout -- submodules/tcut`.
 [submodule "distilled"]
 	path = submodules/distilled
-	url = https://github.com/alchemy-run/distilled.git
+	url = https://github.com/erikshestopal/distilled.git
 [submodule "floci"]
 	path = submodules/floci
 	url = https://github.com/alchemy-run/floci.git

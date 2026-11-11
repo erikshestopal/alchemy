@@ -1,6 +1,7 @@
 import * as Archil from "@alchemy.run/archil";
 import * as AWS from "@alchemy.run/aws";
 import * as Boat from "@alchemy.run/boat";
+import * as ClickHouse from "@alchemy.run/clickhouse";
 import * as Cloudflare from "@alchemy.run/cloudflare";
 import * as Daytona from "@alchemy.run/daytona";
 import * as E2B from "@alchemy.run/e2b";
@@ -23,6 +24,7 @@ export default Alchemy.Stack(
   {
     providers: Layer.mergeAll(
       AWS.providers(),
+      ClickHouse.providers(),
       Cloudflare.providers(),
       Daytona.providers(),
       Fly.providers(),
