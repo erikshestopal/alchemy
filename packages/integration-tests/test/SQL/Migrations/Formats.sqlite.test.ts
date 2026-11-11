@@ -5,12 +5,15 @@ import {
   MigrationError,
   readDrizzleDirRecords,
   readFlatRecords,
+  runMigrations,
   type SqlExecutor,
 } from "@alchemy.run/sql/Migrations";
 import { applyPendingAlchemyFormat } from "@alchemy.run/sql/Migrations/AlchemyFormat";
 import { expect, layer } from "@alchemy.run/test";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import { makeSqliteExecutor, tableNames } from "./sqlite-executor.ts";
 
@@ -833,6 +836,50 @@ describe("one-way conversion from foreign tables", (it) => {
 });
 
 describe("registry apply", (it) => {
+  it.effect(
+    "rejects removing the last applied file with or without a successful output stamp",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const dir = yield* fs.makeTempDirectoryScoped({ prefix: "alchemy-mig-empty-" });
+        const db = yield* Effect.acquireRelease(
+          Effect.sync(() => new Database(":memory:")),
+          (db) => Effect.sync(() => db.close()),
+        );
+        const executor = makeSqliteExecutor(db);
+        const run = (table?: string) =>
+          runMigrations({
+            input: { dir },
+            stamped: { table },
+            withExecutor: (apply) => apply(executor),
+          });
+
+        const empty = yield* run();
+        expect(empty.hashes).toEqual({});
+        const file = path.join(dir, "0001_users.sql");
+        yield* fs.writeFileString(file, "CREATE TABLE users (id INTEGER PRIMARY KEY);");
+        const applied = yield* run();
+        const rows = yield* Effect.sync(() => migrationRows(db));
+        expect(rows.map((row) => row.name)).toEqual(["0001_users.sql"]);
+        yield* fs.remove(file);
+
+        for (const table of [applied.resolved.table, undefined]) {
+          const result = yield* Effect.result(run(table));
+          expect(Result.isFailure(result)).toBe(true);
+          if (Result.isFailure(result)) {
+            expect(result.failure._tag).toBe("RewrittenMigrationHistoryError");
+            if (result.failure._tag === "RewrittenMigrationHistoryError") {
+              expect(result.failure.changed).toEqual([]);
+              expect(result.failure.removed).toEqual(["0001_users.sql"]);
+            }
+          }
+          expect(yield* Effect.sync(() => migrationRows(db))).toEqual(rows);
+        }
+      }),
+    { tags: ["unit", "local"] },
+  );
+
   it.effect(
     "keys directory-layout dirs by directory name",
     () =>

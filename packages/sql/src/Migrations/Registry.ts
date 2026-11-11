@@ -142,9 +142,10 @@ export interface MigrationRun {
 
 /**
  * The whole per-deploy migration pipeline: hash the directory (for state
- * drift tracking), resolve the bookkeeping table, and — when the directory
- * is non-empty — apply pending migrations. The database provider supplies
- * only `withExecutor`, a bracket that acquires its target's
+ * drift tracking), resolve the bookkeeping table, validate applied history,
+ * and apply pending migrations. Empty directories still require validation:
+ * an interrupted create can leave applied rows without an output stamp.
+ * The provider supplies `withExecutor`, a bracket that acquires its target's
  * {@link SqlExecutor} (a D1 HTTP handle, a pg client over a Neon URI or
  * PlanetScale temp role, a mysql2 connection) around the apply.
  */
@@ -164,9 +165,7 @@ export const runMigrations = <E, R>(options: {
   Effect.gen(function* () {
     const hashes = yield* hashMigrationsDir(options.input.dir);
     const resolved = resolveMigrations(options);
-    if (Object.keys(hashes).length > 0) {
-      yield* options.withExecutor((executor) => applyMigrations({ resolved, executor }));
-    }
+    yield* options.withExecutor((executor) => applyMigrations({ resolved, executor }));
     return { resolved, hashes };
   });
 
