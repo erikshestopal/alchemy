@@ -942,23 +942,23 @@ const executeNode = (
 
       const bindingOutputs = excludeDeletedBindings(yield* Output.evaluate(node.bindings, outputs));
 
+      const checkpoint = (attr: any) =>
+        commit<CreatingResourceState>({
+          status: "creating",
+          fqn,
+          logicalId,
+          instanceId,
+          resourceType: node.resource.Type,
+          props: news,
+          attr,
+          providerVersion: node.provider.version ?? 0,
+          bindings: bindingOutputs,
+          downstream: node.downstream,
+          removalPolicy: node.resource.RemovalPolicy,
+          providerMode: node.mode,
+          adoptionBlocked: node.adoptionBlocked,
+        });
       if (!admitted) {
-        const checkpoint = (attr: any) =>
-          commit<CreatingResourceState>({
-            status: "creating",
-            fqn,
-            logicalId,
-            instanceId,
-            resourceType: node.resource.Type,
-            props: news,
-            attr,
-            providerVersion: node.provider.version ?? 0,
-            bindings: bindingOutputs,
-            downstream: node.downstream,
-            removalPolicy: node.resource.RemovalPolicy,
-            providerMode: node.mode,
-            adoptionBlocked: node.adoptionBlocked,
-          });
         // Refusal or interruption must retain identity, never foreign
         // attributes, nor a stub for an identity not yet checked.
         yield* checkpoint(undefined);
@@ -977,9 +977,11 @@ const executeNode = (
           }
           // Reconcile keeps a precreated stub as its output.
           attr ??= stripUnowned(observed);
-          // A creating checkpoint retains olds: undefined on retry.
-          yield* checkpoint(attr);
+          yield* checkpoint(stripUnowned(observed));
         }
+      } else if (attr !== undefined) {
+        // Plan can recover an original that has not reached durable state yet.
+        yield* checkpoint(attr);
       }
 
       attr = yield* node.provider
@@ -1281,6 +1283,7 @@ const executeNode = (
       });
 
       let attr: any = replState.attr;
+      let checkpointAttr = attr;
 
       // ── replacement admission ──
       //
@@ -1301,7 +1304,10 @@ const executeNode = (
           instanceId,
           replState.old?.attr,
         );
-        if (observed === undefined) return;
+        if (observed === undefined) {
+          checkpointAttr = undefined;
+          return;
+        }
         if (Unowned.is(observed) && !node.deferredAdoption?.adopt) {
           return yield* new OwnedBySomeoneElse({
             message:
@@ -1316,7 +1322,10 @@ const executeNode = (
         // A delete-first target may be the previous generation itself, which
         // is about to be deleted — never hand its attributes to reconcile.
         // Reconcile keeps a precreated stub as its output.
-        if (!node.deleteFirst) attr ??= stripUnowned(observed);
+        if (!node.deleteFirst) {
+          checkpointAttr = stripUnowned(observed);
+          attr ??= checkpointAttr;
+        }
       });
 
       // A cycle precreates on the props its upstreams outside the cycle
@@ -1384,7 +1393,8 @@ const executeNode = (
             bindings: excludeDeletedBindings(node.bindings),
           })
           .pipe(instrumentLifecycle("precreate", fqn, node.resource.Type, logicalId, instanceId));
-        yield* commit<ReplacingResourceState>({
+        checkpointAttr = admitted ? attr : undefined;
+        replState = yield* commit<ReplacingResourceState>({
           status: "replacing",
           fqn,
           logicalId,
@@ -1393,7 +1403,7 @@ const executeNode = (
           props: node.props,
           // A stub for an unresolved identity claims nothing. Leave the
           // checkpoint without it, so a retry checks the identity again.
-          attr: admitted ? attr : undefined,
+          attr: checkpointAttr,
           providerVersion: node.provider.version ?? 0,
           bindings: excludeDeletedBindings(node.bindings),
           downstream: node.downstream,
@@ -1425,6 +1435,15 @@ const executeNode = (
       if (node.deleteFirst && !deletedFirst) {
         yield* deleteFirst();
       }
+
+      // Keep resolved identity even when an unresolved precreate claimed nothing.
+      replState = yield* commit<ReplacingResourceState>({
+        ...replState,
+        props: news,
+        propsIncomplete: undefined,
+        bindings: bindingOutputs,
+        attr: checkpointAttr,
+      });
 
       attr = yield* node.provider
         .reconcile({

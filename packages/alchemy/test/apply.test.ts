@@ -11073,6 +11073,8 @@ describe("scoped identity admission", { tags: ["unit", "local"] }, () => {
       partial: boolean;
       /** A broken `observe` that reports even a resolved identity as `Unresolved`. */
       broken: boolean;
+      loseReply: boolean;
+      failPrecreate: boolean;
     }
   >()("AdmissionScopedCloud") {}
   const keyOf = (props: { name: string; scope: string }) => `${props.scope}/${props.name}`;
@@ -11112,6 +11114,7 @@ describe("scoped identity admission", { tags: ["unit", "local"] }, () => {
         : undefined,
       precreate: Effect.fn(function* ({ id, news }) {
         const cloud = yield* Cloud;
+        if (cloud.failPrecreate) return yield* new ResourceFailure();
         // Like a dispatch-namespace Worker: nothing to claim until the scope resolves.
         if (!isResolved(news.scope)) {
           cloud.events.push("precreate stub");
@@ -11127,6 +11130,7 @@ describe("scoped identity admission", { tags: ["unit", "local"] }, () => {
         const key = keyOf(news);
         cloud.events.push(`reconcile ${key}`);
         cloud.owners.set(key, id);
+        if (cloud.loseReply) return yield* new ResourceFailure();
         return { name: news.name, physicalId: key };
       }),
       delete: Effect.fn(function* ({ output }) {
@@ -11144,6 +11148,8 @@ describe("scoped identity admission", { tags: ["unit", "local"] }, () => {
             deleteFirst: false,
             partial: false,
             broken: false,
+            loseReply: false,
+            failPrecreate: false,
           })),
         ),
       ),
@@ -11201,6 +11207,8 @@ describe("scoped identity admission", { tags: ["unit", "local"] }, () => {
     cloud.deleteFirst = false;
     cloud.partial = false;
     cloud.broken = false;
+    cloud.loseReply = false;
+    cloud.failPrecreate = false;
     return cloud;
   });
 
@@ -11323,6 +11331,43 @@ describe("scoped identity admission", { tags: ["unit", "local"] }, () => {
       expect(cloud.owners.get("tenant/api")).toBe("Subject");
       yield* stack.destroy();
       expect(cloud.owners.has("tenant/api")).toBe(false);
+    }),
+  );
+
+  for (const operation of ["create", "replacement"] as const) {
+    test.provider(`a cyclic ${operation} recovers an absent target after a lost reply`, (stack) =>
+      Effect.gen(function* () {
+        const cloud = yield* reset(stack);
+        if (operation === "replacement")
+          yield* stack.deploy(subject("old", { late: "none", cycle: false }));
+        cloud.loseReply = true;
+        yield* stack.deploy(subject("tenant")).pipe(Effect.flip);
+        expect(cloud.owners.get("tenant/api")).toBe("Subject");
+        cloud.loseReply = false;
+        yield* stack.destroy();
+        expect(cloud.owners.has("tenant/api")).toBe(false);
+        expect(cloud.owners.has("old/api")).toBe(false);
+      }),
+    );
+  }
+
+  test.provider("a resumed cyclic replacement keeps retain after a lost reply", (stack) =>
+    Effect.gen(function* () {
+      const cloud = yield* reset(stack);
+      yield* stack.deploy(subject("old", { late: "none", cycle: false }));
+      cloud.failPrecreate = true;
+      yield* stack.deploy(subject("tenant", { late: "none" })).pipe(Effect.flip);
+      cloud.failPrecreate = false;
+      cloud.loseReply = true;
+      yield* stack
+        .deploy(subject("tenant", { late: "none" }).pipe(RemovalPolicy.retain()))
+        .pipe(Effect.flip);
+      expect(cloud.owners.get("tenant/api")).toBe("Subject");
+      cloud.loseReply = false;
+      yield* stack.destroy();
+      expect(cloud.owners.get("tenant/api")).toBe("Subject");
+      expect(cloud.owners.get("old/api")).toBe("Subject");
+      cloud.owners.clear();
     }),
   );
 
@@ -11901,4 +11946,106 @@ describe("incomplete interrupted-create checkpoints", { tags: ["unit", "local"] 
       expect(yield* getState("Subject")).toBeUndefined();
     }),
   );
+});
+
+describe("durable adoption baselines", { tags: ["unit", "local"] }, () => {
+  interface Setting extends Resource<
+    "Test.AdoptedSetting",
+    { key: string; value: number },
+    { key: string; original: number }
+  > {}
+  const Setting = Resource<Setting>("Test.AdoptedSetting");
+  class Cloud extends Context.Service<
+    Cloud,
+    { values: Map<string, number>; loseReply: boolean; writes: number }
+  >()("AdoptionBaselineCloud") {}
+  const providers = Provider.succeed(Setting, {
+    diff: Effect.fn(function* ({ news, output }) {
+      if (isResolved(news) && output && news.key !== output.key)
+        return { action: "replace" } as const;
+    }),
+    read: Effect.fn(function* ({ olds, output }) {
+      if (output) return output;
+      const value = (yield* Cloud).values.get(olds.key);
+      return value === undefined ? undefined : Unowned({ key: olds.key, original: value });
+    }),
+    reconcile: Effect.fn(function* ({ news, output }) {
+      if (!output) return yield* new ResourceFailure();
+      const cloud = yield* Cloud;
+      cloud.values.set(news.key, news.value);
+      cloud.writes++;
+      if (cloud.loseReply) return yield* new ResourceFailure();
+      return output;
+    }),
+    delete: Effect.fn(function* ({ output }) {
+      (yield* Cloud).values.set(output.key, output.original);
+    }),
+  }).pipe(
+    Layer.provideMerge(
+      Layer.effect(
+        Cloud,
+        Effect.sync(() => ({ values: new Map<string, number>(), loseReply: false, writes: 0 })),
+      ),
+    ),
+  );
+  const { test } = Test.make({ providers: Layer.mergeAll(providers, TestLayers()) });
+  const declaration = (key: string, resolved = false) =>
+    Effect.gen(function* () {
+      const source = yield* TestResource("Key", { string: key });
+      return yield* Setting("Subject", { key: resolved ? key : source.string, value: 100 }).pipe(
+        adopt(true),
+      );
+    });
+
+  for (const recovery of ["recovered create", "replacement"] as const) {
+    test.provider(`${recovery} keeps the original after a lost mutation reply`, (stack) =>
+      Effect.gen(function* () {
+        yield* stack.destroy();
+        const cloud = yield* Cloud;
+        cloud.values.clear();
+        cloud.values.set("old", 11);
+        cloud.values.set("target", 83);
+        cloud.loseReply = false;
+        cloud.writes = 0;
+
+        if (recovery === "replacement") {
+          yield* stack.deploy(declaration("old"));
+          expect(cloud.values.get("old")).toBe(100);
+        } else {
+          const plan = yield* stack.plan(declaration("target"));
+          const state = yield* yield* State;
+          const failed = yield* apply(plan).pipe(
+            Effect.provideService(
+              State,
+              Effect.succeed({
+                ...state,
+                set: (request) =>
+                  request.fqn === "Subject" &&
+                  request.value.status === "creating" &&
+                  request.value.attr !== undefined
+                    ? Effect.fail(new StateStoreError({ message: "Baseline save failed" }))
+                    : state.set(request),
+              }),
+            ),
+            Effect.exit,
+          );
+          expect(Exit.isFailure(failed)).toBe(true);
+          expect((yield* getState("Subject")).attr).toBeUndefined();
+          expect(cloud.values.get("target")).toBe(83);
+          expect(cloud.writes).toBe(0);
+        }
+
+        cloud.loseReply = true;
+        const lost = yield* stack
+          .deploy(declaration("target", recovery === "replacement"))
+          .pipe(Effect.exit);
+        expect(Exit.isFailure(lost)).toBe(true);
+        expect(cloud.values.get("target")).toBe(100);
+        cloud.loseReply = false;
+        yield* stack.destroy();
+        expect(cloud.values.get("old")).toBe(11);
+        expect(cloud.values.get("target")).toBe(83);
+      }),
+    );
+  }
 });
